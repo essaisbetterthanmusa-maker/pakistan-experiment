@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGameStore, type GoverningAction } from '../state/gameStore';
 import { PARTIES, type PartyId } from '../data/parties';
-import { PROVINCES } from '../data/provinces';
+import { PROVINCES, TOTAL_NA_SEATS } from '../data/provinces';
 import { SENATE_SEATS, SENATE_MAJORITY } from '../engine/senate';
 import { establishmentScore } from '../engine/types';
 import EstablishmentBadge from '../components/EstablishmentBadge';
@@ -195,17 +195,26 @@ export default function GoverningHub() {
 
   function tryNoConfidence() {
     if (!government) return;
-    // A government the establishment is backing survives votes it otherwise
-    // wouldn't; one that's on the outs finds its own members drifting away.
-    const establishmentHelp = establishmentScore(meters.establishment) * 8;
-    const govStrength = government.totalSeats - (100 - meters.partyUnity) * 0.4 + establishmentHelp;
-    const oppStrength = meters.oppositionStrength * 1.6;
-    const survives = govStrength > oppStrength + (Math.random() * 30 - 15);
-    if (survives) {
-      setNoConfidenceResult('The motion fails. The government survives — but the opposition has shown its hand.');
+    // Both sides have to be measured on the same scale. Government strength is
+    // its share of the 336-seat house, not a raw seat count — comparing a raw
+    // count against a 0-100 opposition meter made the government unlosable.
+    const govShare = (government.totalSeats / TOTAL_NA_SEATS) * 100;
+    // Disloyal backbenchers are exactly who abstains or crosses the floor,
+    // and a government the establishment is backing survives votes it
+    // otherwise wouldn't.
+    const govPower = govShare
+      - (100 - meters.partyUnity) * 0.28
+      + establishmentScore(meters.establishment) * 6;
+    const oppPower = meters.oppositionStrength + (Math.random() * 24 - 12);
+    if (govPower > oppPower) {
+      setNoConfidenceResult(
+        `The motion fails — ${govPower.toFixed(0)} against ${oppPower.toFixed(0)}. The government survives, but the opposition has shown its hand.`
+      );
       advanceGoverning({ partyUnity: clamp(meters.partyUnity - 5), oppositionStrength: clamp(meters.oppositionStrength - 8) });
     } else {
-      fallToOpposition('Your government lost a no-confidence vote. You are now in opposition.');
+      fallToOpposition(
+        `Your government lost a no-confidence vote (${govPower.toFixed(0)} against ${oppPower.toFixed(0)}). You are now in opposition.`
+      );
     }
   }
 

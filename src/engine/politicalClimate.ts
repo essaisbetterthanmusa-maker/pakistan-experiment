@@ -229,8 +229,8 @@ export function generateClimate(
   // and starts sweeping every seat in a province, which never happens in
   // reality even in landslide years.
   for (const id of ALL_PARTY_IDS) {
-    momentum[id] = Math.max(0.62, Math.min(1.45, momentum[id]));
-    for (const p of PROVINCE_LIST) regional[p.id][id] = Math.max(0.72, Math.min(1.3, regional[p.id][id]));
+    momentum[id] = Math.max(0.8, Math.min(1.25, momentum[id]));
+    for (const p of PROVINCE_LIST) regional[p.id][id] = Math.max(0.85, Math.min(1.18, regional[p.id][id]));
   }
 
   return { events, momentum, regional, suppressedParty, electableMagnet, turnoutShift };

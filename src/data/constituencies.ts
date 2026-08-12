@@ -60,11 +60,17 @@ export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCou
   // Peshawar valley. Give every district its own party-lean profile so a
   // province-wide swing can never sweep all of its seats at once — a party
   // that surges still loses the districts that were never theirs.
+  // The spread here matters more than it looks. A province-wide swing shifts
+  // every seat by the same amount, so if all seats sit at similar margins they
+  // all cross the line together and the province lands 130-10. Real provinces
+  // have safe seats for both sides plus a competitive middle, so a swing only
+  // flips the seats near the line. Wide district variation is what produces
+  // realistic 75-66 outcomes instead of alternating landslides.
   const districtLean: Record<string, Record<string, number>> = {};
   for (const d of prov.districts) {
     const lean: Record<string, number> = {};
     for (const pid of [...parties, 'IND' as PartyId]) {
-      lean[pid] = Math.max(0.25, 1 + gaussNoise(rand, 0.42));
+      lean[pid] = Math.max(0.15, 1 + gaussNoise(rand, 0.72));
     }
     districtLean[d] = lean;
   }
@@ -81,7 +87,7 @@ export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCou
       else if (urban && pid === 'PTI') strength += 0.1;
       strength *= climateFor(pid);
       strength *= districtLean[district]?.[pid] ?? 1;
-      strength = Math.max(0.02, strength * (1 + gaussNoise(rand, 0.3)) + gaussNoise(rand, 0.18));
+      strength = Math.max(0.02, strength * (1 + gaussNoise(rand, 0.45)) + gaussNoise(rand, 0.18));
       const baseline = Math.max(2, Math.min(78, strength * 42 + randRange(rand, -6, 6)));
       // A suppressed party's local heavyweights are the ones who jump to an
       // independent ticket, so its remaining candidates are noticeably weaker.

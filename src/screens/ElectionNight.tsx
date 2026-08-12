@@ -120,7 +120,7 @@ export default function ElectionNight() {
           </div>
         ))}
         <div className="majority-track" style={{ marginTop: 14 }}>
-          <div className="majority-marker" style={{ left: '100%' }} title="Majority (269 of 336, projected)" />
+          <div className="majority-marker" style={{ left: '100%' }} title={`Majority (${NA_MAJORITY} of 336, projected)`} />
         </div>
         <p style={{ fontSize: 11, color: 'var(--text-dim)' }}>General seats only — reserved seats (60 women, 10 minority) allocated after count. Majority needs {NA_MAJORITY}/336 overall.</p>
 
