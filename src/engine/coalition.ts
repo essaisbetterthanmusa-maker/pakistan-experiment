@@ -3,6 +3,7 @@ import { PARTIES } from '../data/parties';
 import { NA_MAJORITY } from '../data/provinces';
 import { getRelation, RELATION_RELIABILITY_RANGE, type Relation } from '../data/relations';
 import { mulberry32, randRange, type Rand } from './random';
+import { establishmentScore, type EstablishmentStance } from './types';
 
 export interface CoalitionPartner {
   party: PartyId;
@@ -39,9 +40,12 @@ const HOSTILE_DEMAND_EXTRA = [
   'Veto power over the next cabinet reshuffle',
 ];
 
-export function analyzeCoalitionOptions(totalByParty: Record<PartyId, number>, leaderParty: PartyId, seed: number): CoalitionAnalysis {
+export function analyzeCoalitionOptions(totalByParty: Record<PartyId, number>, leaderParty: PartyId, seed: number, establishmentStance: EstablishmentStance = 'NEUTRAL'): CoalitionAnalysis {
   const rand: Rand = mulberry32(seed + 9001);
   const leaderSeats = totalByParty[leaderParty] ?? 0;
+  // A government seen as establishment-favoured looks like a safer bet to
+  // join; one that's on the outs makes potential partners nervous.
+  const establishmentBonus = establishmentScore(establishmentStance) * 0.04;
   const partners: CoalitionPartner[] = (Object.keys(PARTIES) as PartyId[])
     .filter(id => id !== leaderParty && id !== 'IND' && id !== 'OTH' && (totalByParty[id] ?? 0) > 0)
     .map(id => {
@@ -49,11 +53,12 @@ export function analyzeCoalitionOptions(totalByParty: Record<PartyId, number>, l
       const [lo, hi] = RELATION_RELIABILITY_RANGE[relation];
       const demandCount = relation === 'HOSTILE' ? 3 : relation === 'UNEASY' ? 2 + Math.floor(rand() * 2) : 1 + Math.floor(rand() * 2);
       const pool = relation === 'HOSTILE' || relation === 'UNEASY' ? [...DEMAND_POOL, ...HOSTILE_DEMAND_EXTRA] : DEMAND_POOL;
+      const reliability = Math.max(0.02, Math.min(0.98, randRange(rand, lo, hi) + establishmentBonus));
       return {
         party: id,
         seats: totalByParty[id],
         demand: shuffle(pool, rand).slice(0, demandCount),
-        reliability: Math.round(randRange(rand, lo, hi) * 100) / 100,
+        reliability: Math.round(reliability * 100) / 100,
         relation,
         refuses: relation === 'HOSTILE',
       };
@@ -101,11 +106,15 @@ export function resolveGovernmentFormation(
   acceptedPartners: CoalitionPartner[],
   independentsAttempted: number,
   seed: number,
+  establishmentStance: EstablishmentStance = 'NEUTRAL',
 ): FormationResult {
   const rand: Rand = mulberry32(seed + 55511);
+  const establishmentBonus = establishmentScore(establishmentStance) * 0.05;
 
-  // Independents are never a sure thing — some peel off during talks.
-  const independentsActuallyGained = Math.round(independentsAttempted * (0.45 + rand() * 0.4));
+  // Independents are never a sure thing — some peel off during talks. A
+  // favourable establishment relationship makes them noticeably easier to
+  // hold; a hostile one means fewer of them will risk backing you.
+  const independentsActuallyGained = Math.round(independentsAttempted * Math.max(0.1, Math.min(0.95, 0.45 + rand() * 0.4 + establishmentBonus)));
   const total = leaderSeats + acceptedPartners.reduce((s, p) => s + p.seats, 0) + independentsActuallyGained;
 
   if (leaderSeats >= NA_MAJORITY) {
@@ -118,7 +127,7 @@ export function resolveGovernmentFormation(
     : 0.45;
 
   if (total >= NA_MAJORITY) {
-    const successChance = Math.max(0.08, Math.min(0.95, weightedReliability * 1.05 - 0.05));
+    const successChance = Math.max(0.08, Math.min(0.95, weightedReliability * 1.05 - 0.05 + establishmentBonus));
     const collapsed = rand() > successChance;
     if (collapsed) {
       return {
@@ -130,7 +139,7 @@ export function resolveGovernmentFormation(
   }
 
   if (total >= NA_MAJORITY - 12) {
-    const successChance = Math.max(0.05, Math.min(0.6, weightedReliability * 0.7));
+    const successChance = Math.max(0.05, Math.min(0.6, weightedReliability * 0.7 + establishmentBonus));
     const collapsed = rand() > successChance;
     if (collapsed) {
       return {

@@ -4,6 +4,13 @@ import type { Constituency, CandidateSlate } from '../data/constituencies';
 
 export type EstablishmentStance = 'HOSTILE' | 'COLD' | 'NEUTRAL' | 'WORKING' | 'FAVOURED';
 
+/** -2 (HOSTILE) to +2 (FAVOURED) — how much weight the relationship carries
+ * in coalition reliability, independents' willingness to commit, and a
+ * government's odds of surviving a no-confidence vote. */
+export function establishmentScore(stance: EstablishmentStance): number {
+  return { HOSTILE: -2, COLD: -1, NEUTRAL: 0, WORKING: 1, FAVOURED: 2 }[stance];
+}
+
 export interface CampaignState {
   totalBudget: number; // Rs millions
   spent: number;
@@ -40,6 +47,15 @@ export interface ElectionResult {
   totalByParty: Record<PartyId, number>;
   provinceGeneralByParty: Record<ProvinceId, Record<PartyId, number>>;
   nationalSwing: Record<PartyId, number>;
+  provincialSwing: Record<ProvinceId, Record<PartyId, number>>;
+}
+
+/** Lets a second election (provincial assembly) draw on the same underlying
+ * political mood as the National Assembly race that ran alongside it,
+ * instead of rolling a fully independent, uncorrelated result. */
+export interface SharedSwing {
+  national: Record<PartyId, number>;
+  provincial: Record<ProvinceId, Record<PartyId, number>>;
 }
 
 export type { CandidateSlate };

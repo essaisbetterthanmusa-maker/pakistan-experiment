@@ -6,6 +6,7 @@ import ElectionNight from './screens/ElectionNight';
 import ResultsScreen from './screens/ResultsScreen';
 import GovernmentFormation from './screens/GovernmentFormation';
 import GoverningHub from './screens/GoverningHub';
+import OppositionScreen from './screens/OppositionScreen';
 
 export default function App() {
   const phase = useGameStore(s => s.phase);
@@ -18,6 +19,7 @@ export default function App() {
       {phase === 'RESULTS' && <ResultsScreen />}
       {phase === 'GOVERNMENT_FORMATION' && <GovernmentFormation />}
       {phase === 'GOVERNING' && <GoverningHub />}
+      {phase === 'OPPOSITION' && <OppositionScreen />}
     </div>
   );
 }

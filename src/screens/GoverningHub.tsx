@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { useGameStore } from '../state/gameStore';
+import { useGameStore, type GoverningAction } from '../state/gameStore';
 import { PARTIES, type PartyId } from '../data/parties';
 import { PROVINCES } from '../data/provinces';
 import { SENATE_SEATS, SENATE_MAJORITY } from '../engine/senate';
+import { establishmentScore } from '../engine/types';
 import EstablishmentBadge from '../components/EstablishmentBadge';
 
 interface CrisisOption { label: string; effect: string; delta: Partial<{ publicApproval: number; partyUnity: number; oppositionStrength: number; inflation: number; reserves: number }>; }
@@ -68,6 +69,93 @@ const CRISES: Crisis[] = [
   },
 ];
 
+/**
+ * Things a sitting government can actually *do*, rather than only reacting to
+ * crises. Each has a real cost somewhere — there is no free win here.
+ */
+const GOVERNING_ACTIONS: GoverningAction[] = [
+  {
+    id: 'subsidy',
+    label: 'Fuel & wheat subsidy package',
+    detail: 'Buys public goodwill, drains reserves and worries the IMF.',
+    apply: m => ({
+      publicApproval: clamp(m.publicApproval + 8),
+      economy: { ...m.economy, reserves: Math.max(0, m.economy.reserves - 2.5), inflation: Math.max(0, m.economy.inflation - 1) },
+    }),
+  },
+  {
+    id: 'imf',
+    label: 'Sign a new IMF programme',
+    detail: 'Stabilises reserves and growth; austerity terms hurt at home.',
+    apply: m => ({
+      publicApproval: clamp(m.publicApproval - 9),
+      oppositionStrength: clamp(m.oppositionStrength + 5),
+      economy: { ...m.economy, reserves: m.economy.reserves + 4, gdpGrowth: m.economy.gdpGrowth + 0.4, inflation: Math.max(0, m.economy.inflation - 2) },
+    }),
+  },
+  {
+    id: 'cpec',
+    label: 'Launch a CPEC infrastructure push',
+    detail: 'Growth and visible development, funded by more debt.',
+    apply: m => ({
+      publicApproval: clamp(m.publicApproval + 5),
+      economy: { ...m.economy, gdpGrowth: m.economy.gdpGrowth + 0.6, reserves: Math.max(0, m.economy.reserves - 1.5) },
+      establishment: m.establishment,
+    }),
+  },
+  {
+    id: 'cabinet',
+    label: 'Reshuffle the cabinet',
+    detail: 'Rewards loyalists and steadies the party; looks like panic outside it.',
+    apply: m => ({
+      partyUnity: clamp(m.partyUnity + 10),
+      publicApproval: clamp(m.publicApproval - 3),
+      powerbrokers: m.powerbrokers.map(p => ({ ...p, loyalty: Math.min(100, p.loyalty + 8) })),
+    }),
+  },
+  {
+    id: 'devfunds',
+    label: 'Release development funds to allies',
+    detail: 'Classic patronage — locks in coalition partners, costs the exchequer.',
+    apply: m => ({
+      partyUnity: clamp(m.partyUnity + 5),
+      oppositionStrength: clamp(m.oppositionStrength - 6),
+      economy: { ...m.economy, reserves: Math.max(0, m.economy.reserves - 1.5) },
+      powerbrokers: m.powerbrokers.map(p => ({ ...p, loyalty: Math.min(100, p.loyalty + 5) })),
+    }),
+  },
+  {
+    id: 'crackdown',
+    label: 'Crack down on opposition protests',
+    detail: 'Suppresses the street in the short run; the backlash is real.',
+    apply: m => ({
+      oppositionStrength: clamp(m.oppositionStrength - 12),
+      publicApproval: clamp(m.publicApproval - 7),
+    }),
+  },
+  {
+    id: 'taxreform',
+    label: 'Broaden the tax base',
+    detail: 'The responsible choice nobody thanks you for.',
+    apply: m => ({
+      publicApproval: clamp(m.publicApproval - 6),
+      partyUnity: clamp(m.partyUnity - 4),
+      economy: { ...m.economy, reserves: m.economy.reserves + 2.5, gdpGrowth: m.economy.gdpGrowth + 0.2 },
+    }),
+  },
+  {
+    id: 'energy',
+    label: 'Energy sector reform',
+    detail: 'Tackles circular debt and loadshedding — slow, unglamorous, expensive up front.',
+    apply: m => ({
+      publicApproval: clamp(m.publicApproval + 3),
+      economy: { ...m.economy, reserves: Math.max(0, m.economy.reserves - 1), gdpGrowth: m.economy.gdpGrowth + 0.5 },
+    }),
+  },
+];
+
+const MAX_TERM_ACTIONS = 4;
+
 const OUTCOME_LABEL: Record<string, string> = {
   MAJORITY: 'Majority Government',
   COALITION: 'Coalition Government',
@@ -77,10 +165,11 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 export default function GoverningHub() {
-  const { government, meters, electionResult, playerParty, leader, provincialAssemblies, senateByParty, advanceGoverning, logCrisis, callNextElection, courtEstablishment } = useGameStore();
+  const { government, meters, electionResult, playerParty, leader, provincialAssemblies, senateByParty, advanceGoverning, logCrisis, callNextElection, courtEstablishment, takeGoverningAction, termActionsUsed, fallToOpposition } = useGameStore();
   const [activeCrisis, setActiveCrisis] = useState<Crisis | null>(null);
   const [noConfidenceResult, setNoConfidenceResult] = useState<string | null>(null);
   const [establishmentNote, setEstablishmentNote] = useState<string | null>(null);
+  const [usedActionIds, setUsedActionIds] = useState<string[]>([]);
 
   if (!government || !electionResult || !playerParty) return null;
 
@@ -106,16 +195,24 @@ export default function GoverningHub() {
 
   function tryNoConfidence() {
     if (!government) return;
-    const govStrength = government.totalSeats - (100 - meters.partyUnity) * 0.4;
+    // A government the establishment is backing survives votes it otherwise
+    // wouldn't; one that's on the outs finds its own members drifting away.
+    const establishmentHelp = establishmentScore(meters.establishment) * 8;
+    const govStrength = government.totalSeats - (100 - meters.partyUnity) * 0.4 + establishmentHelp;
     const oppStrength = meters.oppositionStrength * 1.6;
     const survives = govStrength > oppStrength + (Math.random() * 30 - 15);
     if (survives) {
       setNoConfidenceResult('The motion fails. The government survives — but the opposition has shown its hand.');
       advanceGoverning({ partyUnity: clamp(meters.partyUnity - 5), oppositionStrength: clamp(meters.oppositionStrength - 8) });
     } else {
-      setNoConfidenceResult('The motion succeeds. The government has fallen.');
-      advanceGoverning({ oppositionStrength: 90 });
+      fallToOpposition('Your government lost a no-confidence vote. You are now in opposition.');
     }
+  }
+
+  function useAction(action: GoverningAction) {
+    if (termActionsUsed >= MAX_TERM_ACTIONS || usedActionIds.includes(action.id)) return;
+    takeGoverningAction(action);
+    setUsedActionIds(prev => [...prev, action.id]);
   }
 
   const sortedSenate = senateByParty
@@ -170,8 +267,35 @@ export default function GoverningHub() {
       </div>
 
       <div className="card" style={{ marginTop: 18 }}>
+        <h3 style={{ marginBottom: 6 }}>Govern — policy agenda ({termActionsUsed}/{MAX_TERM_ACTIONS} used this term)</h3>
+        <p className="stat-line" style={{ marginBottom: 14 }}>
+          You cannot do everything in one term. Every option below buys you something and costs you something else.
+        </p>
+        <div className="panel-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
+          {GOVERNING_ACTIONS.map(a => {
+            const used = usedActionIds.includes(a.id);
+            const exhausted = termActionsUsed >= MAX_TERM_ACTIONS;
+            return (
+              <button
+                key={a.id}
+                className="btn"
+                disabled={used || exhausted}
+                onClick={() => useAction(a)}
+                style={{ display: 'block', textAlign: 'left', height: '100%', padding: '12px 14px' }}
+              >
+                <b>{a.label}</b>
+                <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4, fontWeight: 400, lineHeight: 1.45 }}>
+                  {used ? 'Already enacted this term.' : a.detail}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
         <h3 style={{ marginBottom: 6 }}>Provincial assemblies</h3>
-        <p className="stat-line" style={{ marginBottom: 14 }}>Each assembly was fought seat-by-seat, independently of the National Assembly result. A federal majority does not guarantee provincial control.</p>
+        <p className="stat-line" style={{ marginBottom: 14 }}>Fought seat-by-seat on the same day, and on the same political wave, as the National Assembly race — so a province you swept nationally should broadly track here too. A federal majority still does not guarantee provincial control.</p>
         <div className="panel-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
           {provincialAssemblies && (Object.keys(provincialAssemblies) as (keyof typeof provincialAssemblies)[]).map(pid => {
             const pa = provincialAssemblies[pid];

@@ -5,7 +5,7 @@ import { PARTIES } from '../data/parties';
 import EstablishmentBadge from '../components/EstablishmentBadge';
 
 export default function CampaignScreen() {
-  const { seats, playerParty, leader, campaign, updateCampaignSpend, updateMediaSpend, toggleTargetSeat, recruitElectable, rejectElectable, finishCampaign } = useGameStore();
+  const { seats, playerParty, leader, campaign, climate, updateCampaignSpend, updateMediaSpend, toggleTargetSeat, recruitElectable, rejectElectable, finishCampaign } = useGameStore();
 
   const winnableSeats = useMemo(() => {
     if (!playerParty) return [];
@@ -42,6 +42,23 @@ export default function CampaignScreen() {
           <button className="btn btn-primary" onClick={finishCampaign}>Go to Polling Day →</button>
         </div>
       </div>
+
+      {climate && climate.events.length > 0 && (
+        <div className="card" style={{ margin: '16px 20px 0', borderColor: 'var(--accent-2)' }}>
+          <h3 style={{ marginBottom: 8, color: 'var(--accent-2)' }}>The political weather this cycle</h3>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {climate.events.map(e => (
+              <div key={e.id} style={{ fontSize: 14 }}>
+                <b>{e.headline}</b>
+                <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 2 }}>{e.detail}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-dimmer)', marginTop: 10 }}>
+            These forces reshape party strength across every constituency — no two elections play out the same way.
+          </p>
+        </div>
+      )}
 
       <div className="campaign-layout">
         <div className="card">

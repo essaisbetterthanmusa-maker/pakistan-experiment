@@ -14,14 +14,14 @@ const RELATION_COLOR: Record<string, string> = {
 };
 
 export default function GovernmentFormation() {
-  const { electionResult, playerParty, seed, formGovernment, formationAttempts, lastFormationResult, forceFreshElection, forceMinorityGovernment } = useGameStore();
+  const { electionResult, playerParty, seed, formGovernment, formationAttempts, lastFormationResult, forceFreshElection, forceMinorityGovernment, fallToOpposition, meters } = useGameStore();
   const [accepted, setAccepted] = useState<Set<PartyId>>(new Set());
   const [independentsAttempted, setIndependentsAttempted] = useState(0);
 
   const analysis = useMemo(() => {
     if (!electionResult || !playerParty) return null;
-    return analyzeCoalitionOptions(electionResult.totalByParty, playerParty, seed);
-  }, [electionResult, playerParty, seed]);
+    return analyzeCoalitionOptions(electionResult.totalByParty, playerParty, seed, meters.establishment);
+  }, [electionResult, playerParty, seed, meters.establishment]);
 
   if (!electionResult || !playerParty || !analysis) return null;
 
@@ -79,7 +79,12 @@ export default function GovernmentFormation() {
           <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-danger" onClick={forceFreshElection}>Call Fresh Elections Instead</button>
             {formationAttempts >= 2 && (
-              <button className="btn" onClick={forceMinorityGovernment}>Take Power Anyway — Weak Minority Government</button>
+              <>
+                <button className="btn" onClick={forceMinorityGovernment}>Take Power Anyway — Weak Minority Government</button>
+                <button className="btn" onClick={() => fallToOpposition('You failed to form a government. A rival bloc took power and you sit in opposition.')}>
+                  Concede — Sit in Opposition
+                </button>
+              </>
             )}
           </div>
         </div>

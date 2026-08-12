@@ -2,6 +2,7 @@ import { PARTIES, type PartyId } from './parties';
 import type { ProvinceId, ProvinceMeta } from './provinces';
 import { PROVINCE_LIST, PROVINCES } from './provinces';
 import { mulberry32, randRange, randInt, pick, gaussNoise, type Rand } from '../engine/random';
+import type { PoliticalClimate } from '../engine/politicalClimate';
 
 export interface CandidateSlate {
   party: PartyId;
@@ -46,9 +47,27 @@ function contestingParties(province: ProvinceId): PartyId[] {
 }
 
 /** Generates `seatCount` constituencies for a single province, id-prefixed (NA-/PA-). Shared by the national and provincial-assembly generators so both draw on the same underlying political geography. */
-export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCount: number, prefix: string, startIndex = 1): Constituency[] {
+export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCount: number, prefix: string, startIndex = 1, climate?: PoliticalClimate): Constituency[] {
   const parties = contestingParties(prov.id);
   const seats: Constituency[] = [];
+
+  // How strongly this cycle's political weather is pushing each party here.
+  const climateFor = (pid: PartyId) =>
+    climate ? climate.momentum[pid] * climate.regional[prov.id][pid] : 1;
+
+  // Provinces are not politically uniform. Central Punjab behaves nothing like
+  // the south; Karachi nothing like rural Sindh; Hazara nothing like the
+  // Peshawar valley. Give every district its own party-lean profile so a
+  // province-wide swing can never sweep all of its seats at once — a party
+  // that surges still loses the districts that were never theirs.
+  const districtLean: Record<string, Record<string, number>> = {};
+  for (const d of prov.districts) {
+    const lean: Record<string, number> = {};
+    for (const pid of [...parties, 'IND' as PartyId]) {
+      lean[pid] = Math.max(0.25, 1 + gaussNoise(rand, 0.42));
+    }
+    districtLean[d] = lean;
+  }
 
   for (let i = 0; i < seatCount; i++) {
     const district = prov.districts[Math.floor((i / seatCount) * prov.districts.length)] ?? pick(rand, prov.districts);
@@ -60,14 +79,21 @@ export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCou
       let strength = party.provinceStrength[prov.id];
       if (isKarachi && party.urbanSindhBoost) strength += party.urbanSindhBoost;
       else if (urban && pid === 'PTI') strength += 0.1;
-      strength = Math.max(0.02, strength + gaussNoise(rand, 0.22));
+      strength *= climateFor(pid);
+      strength *= districtLean[district]?.[pid] ?? 1;
+      strength = Math.max(0.02, strength * (1 + gaussNoise(rand, 0.3)) + gaussNoise(rand, 0.18));
       const baseline = Math.max(2, Math.min(78, strength * 42 + randRange(rand, -6, 6)));
-      const candidateStrength = Math.round(Math.max(1, Math.min(10, 3 + strength * 3 + gaussNoise(rand, 1.6))));
-      const isElectable = candidateStrength >= 8 && rand() < 0.6;
+      // A suppressed party's local heavyweights are the ones who jump to an
+      // independent ticket, so its remaining candidates are noticeably weaker.
+      const suppressed = climate?.suppressedParty === pid;
+      const magnet = climate?.electableMagnet === pid;
+      const candidateStrength = Math.round(Math.max(1, Math.min(10,
+        3 + strength * 3 + gaussNoise(rand, 1.6) + (magnet ? 1.5 : 0) - (suppressed ? 1.5 : 0))));
+      const isElectable = candidateStrength >= 8 && rand() < (magnet ? 0.75 : suppressed ? 0.35 : 0.6);
       return { party: pid, baseline, candidateStrength, candidateName: randomCandidateName(rand), incumbent: false, isElectable };
     })
     .concat(Array.from({ length: randInt(rand, 1, 3) }, () => {
-      const strength = Math.max(0.05, PARTIES.IND.provinceStrength[prov.id] + gaussNoise(rand, 0.3));
+      const strength = Math.max(0.05, PARTIES.IND.provinceStrength[prov.id] * climateFor('IND') * (districtLean[district]?.IND ?? 1) + gaussNoise(rand, 0.3));
       const baseline = Math.max(1, Math.min(45, strength * 30 + randRange(rand, -5, 10)));
       const candidateStrength = Math.round(Math.max(1, Math.min(10, 4 + strength * 3 + gaussNoise(rand, 1.8))));
       return {
@@ -99,7 +125,7 @@ export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCou
       district,
       urban,
       category,
-      turnoutBase: randRange(rand, 0.35, 0.58),
+      turnoutBase: Math.max(0.25, Math.min(0.72, randRange(rand, 0.35, 0.58) + (climate?.turnoutShift ?? 0))),
       swingSensitivity: randRange(rand, 0.6, 1.5),
       slates,
       favoredParty: sorted[0].party,
@@ -108,12 +134,12 @@ export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCou
   return seats;
 }
 
-export function generateConstituencies(seed: number): Constituency[] {
+export function generateConstituencies(seed: number, climate?: PoliticalClimate): Constituency[] {
   const rand = mulberry32(seed);
   const seats: Constituency[] = [];
   let naCounter = 1;
   for (const prov of PROVINCE_LIST) {
-    const provSeats = generateSeatsForProvince(rand, prov, prov.generalSeats, 'NA', naCounter);
+    const provSeats = generateSeatsForProvince(rand, prov, prov.generalSeats, 'NA', naCounter, climate);
     seats.push(...provSeats);
     naCounter += prov.generalSeats;
   }
@@ -121,12 +147,12 @@ export function generateConstituencies(seed: number): Constituency[] {
 }
 
 /** Provincial assembly general seats, one independently-seeded set per province. */
-export function generateProvincialAssemblySeats(seed: number): Record<ProvinceId, Constituency[]> {
+export function generateProvincialAssemblySeats(seed: number, climate?: PoliticalClimate): Record<ProvinceId, Constituency[]> {
   const out: Record<ProvinceId, Constituency[]> = {} as any;
   for (const prov of PROVINCE_LIST) {
     if (prov.paSeats === 0) { out[prov.id] = []; continue; }
     const rand = mulberry32(seed + hashString(prov.id) * 7793);
-    out[prov.id] = generateSeatsForProvince(rand, prov, prov.paSeats, 'PA');
+    out[prov.id] = generateSeatsForProvince(rand, prov, prov.paSeats, 'PA', 1, climate);
   }
   return out;
 }

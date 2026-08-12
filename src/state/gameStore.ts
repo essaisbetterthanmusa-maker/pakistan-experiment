@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PartyId } from '../data/parties';
+import { PARTIES, type PartyId } from '../data/parties';
 import type { ProvinceId } from '../data/provinces';
 import { generateConstituencies, type Constituency } from '../data/constituencies';
 import { PROVINCE_LIST } from '../data/provinces';
@@ -13,10 +13,11 @@ import { simulateProvincialAssemblies, type ProvincialAssemblyResult } from '../
 import { approximateSenateComposition } from '../engine/senate';
 import { randomCandidateName } from '../data/constituencies';
 import { mulberry32 } from '../engine/random';
+import { generateClimate, type PoliticalClimate } from '../engine/politicalClimate';
 
 export type GamePhase =
   | 'START' | 'PARTY_SELECT' | 'CAMPAIGN' | 'ELECTION_NIGHT' | 'RESULTS'
-  | 'GOVERNMENT_FORMATION' | 'GOVERNING';
+  | 'GOVERNMENT_FORMATION' | 'GOVERNING' | 'OPPOSITION';
 
 export interface GovernmentState {
   outcome: GovernmentOutcome;
@@ -41,6 +42,31 @@ export interface GoverningMeters {
   powerbrokers: Powerbroker[];
 }
 
+/** Player-initiated actions available while in government, each with a real
+ * cost — you can't take every one in a term. */
+export interface GoverningAction {
+  id: string;
+  label: string;
+  detail: string;
+  apply: (m: GoverningMeters) => Partial<GoverningMeters>;
+}
+
+/** Player-initiated actions available while in opposition, building toward
+ * either toppling the government or winning the next election. */
+export interface OppositionAction {
+  id: string;
+  label: string;
+  detail: string;
+}
+
+export interface OppositionState {
+  governingParty: PartyId;
+  momentum: number;      // 0-100, your opposition movement's strength
+  govStability: number;  // 0-100, how secure the sitting government is
+  log: string[];
+  actionsTaken: number;
+}
+
 interface GameState {
   phase: GamePhase;
   seed: number;
@@ -57,6 +83,9 @@ interface GameState {
   electionCycle: number;
   formationAttempts: number;
   lastFormationResult: FormationResult | null;
+  termActionsUsed: number;
+  opposition: OppositionState | null;
+  climate: PoliticalClimate | null;
 
   startNewGame: () => void;
   choosePartyAndLeader: (party: PartyId, leader: LeaderOption) => void;
@@ -76,9 +105,33 @@ interface GameState {
   callNextElection: () => void;
   forceFreshElection: () => void;
   courtEstablishment: () => { success: boolean; text: string };
+  takeGoverningAction: (action: GoverningAction) => void;
+  fallToOpposition: (reason: string) => void;
+  takeOppositionAction: (action: OppositionAction) => { text: string; toppled: boolean };
 }
 
 const PROVINCE_IDS = PROVINCE_LIST.map(p => p.id);
+
+/**
+ * The establishment's starting lean, if any. PML-N has historically been read
+ * as the establishment's default pick going into an election, PPP occasionally
+ * gets a working arrangement, and PTI's relationship has been openly hostile
+ * since 2022 — so PTI is a rare outlier here rather than an equal roll.
+ */
+function pickEstablishmentLean(): PartyId | null {
+  if (Math.random() < 0.4) return null;
+  // Weighted by each party's establishment affinity — a party the
+  // establishment has been actively squeezing is very unlikely to be its pick.
+  const candidates: PartyId[] = ['PMLN', 'PPP', 'PTI'];
+  const weights = candidates.map(id => Math.max(0.05, PARTIES[id].establishmentAffinity + 2.2));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < candidates.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return candidates[i];
+  }
+  return 'PMLN';
+}
 
 function freshCampaign(): CampaignState {
   return {
@@ -132,12 +185,18 @@ export const useGameStore = create<GameState>((set, get) => ({
   electionCycle: 1,
   formationAttempts: 0,
   lastFormationResult: null,
+  termActionsUsed: 0,
+  opposition: null,
+  climate: null,
 
   startNewGame: () => {
     const seed = Math.floor(Math.random() * 1_000_000);
+    const establishmentLean = pickEstablishmentLean();
+    const climate = generateClimate(seed, { establishmentLean });
     set({
       seed,
-      seats: generateConstituencies(seed),
+      climate,
+      seats: generateConstituencies(seed, climate),
       phase: 'PARTY_SELECT',
       playerParty: null,
       leader: null,
@@ -150,7 +209,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       electionCycle: 1,
       formationAttempts: 0,
       lastFormationResult: null,
-      establishmentLean: Math.random() < 0.5 ? null : (['PMLN', 'PTI', 'PPP'] as PartyId[])[Math.floor(Math.random() * 3)],
+      termActionsUsed: 0,
+      opposition: null,
+      establishmentLean,
     });
   },
 
@@ -216,10 +277,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   finishCampaign: () => set({ phase: 'ELECTION_NIGHT' }),
 
   runElection: () => {
-    const { seats, playerParty, campaign, establishmentLean, seed, electionCycle } = get();
+    const { seats, playerParty, campaign, establishmentLean, seed, electionCycle, climate } = get();
     const raw = simulateElection(seats, playerParty, campaign, establishmentLean, seed + electionCycle * 7919);
     const result = allocateReservedSeats(raw);
-    const provincialAssemblies = simulateProvincialAssemblies(seed + electionCycle * 7919, establishmentLean);
+    // Provincial assemblies vote the same day as the National Assembly, so they
+    // ride the same underlying swing — a party's NA landslide in a province
+    // should show up in that province's assembly result too.
+    const provincialAssemblies = simulateProvincialAssemblies(seed + electionCycle * 7919, establishmentLean, {
+      national: raw.nationalSwing,
+      provincial: raw.provincialSwing,
+    }, climate ?? undefined);
     const senateByParty = approximateSenateComposition(result.totalByParty, seed + electionCycle * 7919);
     set({ electionResult: result, provincialAssemblies, senateByParty });
   },
@@ -228,10 +295,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   goToGovernmentFormation: () => set({ phase: 'GOVERNMENT_FORMATION' }),
 
   formGovernment: (accepted, independentsAttempted) => {
-    const { electionResult, playerParty, seed, formationAttempts } = get();
+    const { electionResult, playerParty, seed, formationAttempts, meters } = get();
     if (!electionResult || !playerParty) return;
     const leaderSeats = electionResult.totalByParty[playerParty] ?? 0;
-    const result = resolveGovernmentFormation(leaderSeats, accepted, independentsAttempted, seed + formationAttempts * 131);
+    const result = resolveGovernmentFormation(leaderSeats, accepted, independentsAttempted, seed + formationAttempts * 131, meters.establishment);
 
     if (result.outcome === 'FAILED') {
       set({
@@ -270,6 +337,114 @@ export const useGameStore = create<GameState>((set, get) => ({
     set(state => ({ meters: { ...state.meters, ...delta } }));
   },
 
+  takeGoverningAction: (action) => {
+    const { meters, termActionsUsed } = get();
+    const delta = action.apply(meters);
+    set({
+      meters: { ...meters, ...delta },
+      termActionsUsed: termActionsUsed + 1,
+    });
+    get().logCrisis(`Policy: ${action.label} — ${action.detail}`);
+  },
+
+  fallToOpposition: (reason) => {
+    const { electionResult, playerParty, meters } = get();
+    if (!electionResult || !playerParty) return;
+    // Whoever placed highest other than the player takes over.
+    const rival = (Object.keys(electionResult.totalByParty) as PartyId[])
+      .filter(id => id !== playerParty && id !== 'IND' && id !== 'OTH' && electionResult.totalByParty[id] > 0)
+      .sort((a, b) => electionResult.totalByParty[b] - electionResult.totalByParty[a])[0] ?? 'PMLN';
+    set({
+      phase: 'OPPOSITION',
+      government: null,
+      opposition: {
+        governingParty: rival,
+        momentum: Math.max(20, Math.min(70, meters.publicApproval * 0.6 + 15)),
+        govStability: 65,
+        log: [reason],
+        actionsTaken: 0,
+      },
+    });
+  },
+
+  takeOppositionAction: (action) => {
+    const { opposition, meters } = get();
+    if (!opposition) return { text: '', toppled: false };
+
+    let momentumDelta = 0;
+    let stabilityDelta = 0;
+    let text = '';
+    const roll = Math.random();
+
+    switch (action.id) {
+      case 'protest':
+        momentumDelta = 6 + roll * 10;
+        stabilityDelta = -(4 + roll * 8);
+        text = roll > 0.7
+          ? 'The long march draws huge crowds — the government looks rattled.'
+          : 'The protest fills streets in your strongholds, little movement elsewhere.';
+        break;
+      case 'defectors':
+        if (roll > 0.55) {
+          momentumDelta = 10;
+          stabilityDelta = -14;
+          text = 'Several government backbenchers quietly signal they are ready to cross the floor.';
+        } else {
+          momentumDelta = -3;
+          stabilityDelta = 3;
+          text = 'Your approach leaks. The government whips its members back into line and paints you as a schemer.';
+        }
+        break;
+      case 'noconfidence': {
+        const chance = (opposition.momentum - opposition.govStability + 40) / 100;
+        if (roll < chance) {
+          set({
+            opposition: { ...opposition, log: ['The no-confidence motion succeeds — the government has fallen.', ...opposition.log], actionsTaken: opposition.actionsTaken + 1 },
+          });
+          return { text: 'The no-confidence motion SUCCEEDS. The government falls and you are invited to form one.', toppled: true };
+        }
+        momentumDelta = -10;
+        stabilityDelta = 6;
+        text = 'The motion fails on the floor. The government survives and your numbers look weaker for having tried.';
+        break;
+      }
+      case 'media':
+        momentumDelta = 4 + roll * 7;
+        stabilityDelta = -(2 + roll * 5);
+        text = 'Your media campaign lands — the government spends the week on the defensive.';
+        break;
+      case 'alliance':
+        momentumDelta = 8 + roll * 6;
+        stabilityDelta = -(3 + roll * 6);
+        text = 'You bring another opposition party into a joint platform. The bloc looks more credible.';
+        break;
+      case 'courts':
+        if (roll > 0.5) {
+          momentumDelta = 9;
+          stabilityDelta = -10;
+          text = 'The courts admit your petition. The government faces a genuine legal problem.';
+        } else {
+          momentumDelta = -4;
+          stabilityDelta = 4;
+          text = 'The petition is dismissed. The government calls it vindication.';
+        }
+        break;
+    }
+
+    const next: OppositionState = {
+      ...opposition,
+      momentum: Math.max(0, Math.min(100, opposition.momentum + momentumDelta)),
+      govStability: Math.max(0, Math.min(100, opposition.govStability + stabilityDelta)),
+      log: [text, ...opposition.log].slice(0, 20),
+      actionsTaken: opposition.actionsTaken + 1,
+    };
+    set({
+      opposition: next,
+      meters: { ...meters, oppositionStrength: next.momentum },
+    });
+    return { text, toppled: false };
+  },
+
   courtEstablishment: () => {
     const order: EstablishmentStance[] = ['HOSTILE', 'COLD', 'NEUTRAL', 'WORKING', 'FAVOURED'];
     const { meters } = get();
@@ -291,10 +466,18 @@ export const useGameStore = create<GameState>((set, get) => ({
   },
 
   callNextElection: () => {
-    const { seed, electionCycle } = get();
+    const { seed, electionCycle, playerParty, meters, government, establishmentLean } = get();
     const newCycle = electionCycle + 1;
+    // The next cycle's weather is shaped by how this term actually went.
+    const climate = generateClimate(seed + newCycle * 104729, {
+      incumbentParty: government ? playerParty : null,
+      incumbentApproval: meters.publicApproval,
+      inflation: meters.economy.inflation,
+      establishmentLean,
+    });
     set({
-      seats: generateConstituencies(seed + newCycle * 104729),
+      climate,
+      seats: generateConstituencies(seed + newCycle * 104729, climate),
       campaign: freshCampaign(),
       electionResult: null,
       provincialAssemblies: null,
@@ -304,14 +487,23 @@ export const useGameStore = create<GameState>((set, get) => ({
       electionCycle: newCycle,
       formationAttempts: 0,
       lastFormationResult: null,
+      termActionsUsed: 0,
+      opposition: null,
     });
   },
 
   forceFreshElection: () => {
-    const { seed, electionCycle, meters } = get();
+    const { seed, electionCycle, meters, playerParty, government, establishmentLean } = get();
     const newCycle = electionCycle + 1;
+    const climate = generateClimate(seed + newCycle * 104729, {
+      incumbentParty: government ? playerParty : null,
+      incumbentApproval: meters.publicApproval,
+      inflation: meters.economy.inflation,
+      establishmentLean,
+    });
     set({
-      seats: generateConstituencies(seed + newCycle * 104729),
+      climate,
+      seats: generateConstituencies(seed + newCycle * 104729, climate),
       campaign: freshCampaign(),
       electionResult: null,
       provincialAssemblies: null,
@@ -321,15 +513,17 @@ export const useGameStore = create<GameState>((set, get) => ({
       electionCycle: newCycle,
       formationAttempts: 0,
       lastFormationResult: null,
+      termActionsUsed: 0,
+      opposition: null,
       meters: { ...meters, oppositionStrength: Math.min(100, meters.oppositionStrength + 15) },
     });
   },
 }));
 
 export function coalitionAnalysisForCurrent() {
-  const { electionResult, playerParty, seed } = useGameStore.getState();
+  const { electionResult, playerParty, seed, meters } = useGameStore.getState();
   if (!electionResult || !playerParty) return null;
-  return analyzeCoalitionOptions(electionResult.totalByParty, playerParty, seed);
+  return analyzeCoalitionOptions(electionResult.totalByParty, playerParty, seed, meters.establishment);
 }
 
 export { LEADERS_BY_PARTY };

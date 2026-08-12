@@ -3,7 +3,7 @@ import type { PartyId } from '../data/parties';
 import { PARTIES } from '../data/parties';
 import type { ProvinceId } from '../data/provinces';
 import { PROVINCE_LIST } from '../data/provinces';
-import type { CampaignState, ElectionResult, SeatResult, SeatResultLine } from './types';
+import type { CampaignState, ElectionResult, SeatResult, SeatResultLine, SharedSwing } from './types';
 import { mulberry32, gaussNoise, randRange, type Rand } from './random';
 
 const ALL_PARTY_IDS = Object.keys(PARTIES) as PartyId[];
@@ -46,13 +46,22 @@ export function simulateElection(
   campaign: CampaignState | null,
   establishmentLean: PartyId | null,
   seed: number,
+  sharedSwing?: SharedSwing,
 ): ElectionResult {
   const rand: Rand = mulberry32(seed);
 
   // National swing: every party gets a random national mood shift; the player's
   // party gets a modest boost proportional to total campaign spend efficiency.
+  // When a shared swing is supplied (provincial assemblies voting the same day
+  // as the National Assembly), we anchor to it so results stay correlated —
+  // the same wave that wins a party its NA seats in a province should carry
+  // into that province's assembly too, not roll a fresh, unrelated outcome.
   const nationalSwing: Record<PartyId, number> = zeroTally();
-  for (const id of ALL_PARTY_IDS) nationalSwing[id] = gaussNoise(rand, 3.2);
+  for (const id of ALL_PARTY_IDS) {
+    nationalSwing[id] = sharedSwing
+      ? sharedSwing.national[id] + gaussNoise(rand, 1.1)
+      : gaussNoise(rand, 3.2);
+  }
   if (playerParty && campaign) {
     const efficiency = Math.min(1, campaign.spent / Math.max(1, campaign.totalBudget));
     nationalSwing[playerParty] += efficiency * randRange(rand, 2, 5);
@@ -63,7 +72,11 @@ export function simulateElection(
   const provincialSwing: Record<ProvinceId, Record<PartyId, number>> = {} as any;
   for (const prov of PROVINCE_LIST) {
     provincialSwing[prov.id] = zeroTally();
-    for (const id of ALL_PARTY_IDS) provincialSwing[prov.id][id] = gaussNoise(rand, 2.4);
+    for (const id of ALL_PARTY_IDS) {
+      provincialSwing[prov.id][id] = sharedSwing
+        ? sharedSwing.provincial[prov.id][id] + gaussNoise(rand, 0.9)
+        : gaussNoise(rand, 2.4);
+    }
   }
 
   const seatResults: SeatResult[] = [];
@@ -123,6 +136,7 @@ export function simulateElection(
     totalByParty: { ...generalSeatsByParty },
     provinceGeneralByParty,
     nationalSwing,
+    provincialSwing,
   };
 }
 
