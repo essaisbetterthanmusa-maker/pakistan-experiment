@@ -286,7 +286,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     const provincialAssemblies = simulateProvincialAssemblies(seed + electionCycle * 7919, establishmentLean, {
       national: raw.nationalSwing,
       provincial: raw.provincialSwing,
-    }, climate ?? undefined);
+    }, climate ?? undefined, playerParty, campaign);
     const senateByParty = approximateSenateComposition(result.totalByParty, seed + electionCycle * 7919);
     set({ electionResult: result, provincialAssemblies, senateByParty });
   },

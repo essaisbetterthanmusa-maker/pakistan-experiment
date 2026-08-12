@@ -3,7 +3,7 @@ import { PROVINCE_LIST, type ProvinceId } from '../data/provinces';
 import { generateProvincialAssemblySeats, randomCandidateName, type Constituency } from '../data/constituencies';
 import { simulateElection } from './electionEngine';
 import { allocateReservedSeatsGeneric } from './reservedSeats';
-import type { ElectionResult, SharedSwing } from './types';
+import type { CampaignState, ElectionResult, SharedSwing } from './types';
 import type { PoliticalClimate } from './politicalClimate';
 import { mulberry32 } from './random';
 
@@ -48,14 +48,27 @@ const KNOWN_CM_CANDIDATES: Partial<Record<ProvinceId, Partial<Record<PartyId, st
  * election held the same day, so a party's provincial performance tracks its
  * national performance in that province instead of rolling independently.
  */
-export function simulateProvincialAssemblies(seed: number, establishmentLean: PartyId | null, sharedSwing?: SharedSwing, climate?: PoliticalClimate): Record<ProvinceId, ProvincialAssemblyResult> {
+export function simulateProvincialAssemblies(
+  seed: number,
+  establishmentLean: PartyId | null,
+  sharedSwing?: SharedSwing,
+  climate?: PoliticalClimate,
+  playerParty?: PartyId | null,
+  campaign?: CampaignState | null,
+): Record<ProvinceId, ProvincialAssemblyResult> {
   const out: Record<ProvinceId, ProvincialAssemblyResult> = {} as any;
   const allSeats = generateProvincialAssemblySeats(seed, climate);
 
   for (const prov of PROVINCE_LIST) {
     if (prov.paSeats === 0) continue; // Islamabad has no provincial assembly
     const seats = allSeats[prov.id];
-    const raw = simulateElection(seats, null, null, establishmentLean, seed + hashString(prov.id) * 104729, sharedSwing);
+    // NA and provincial seats are contested on the same day by the same party
+    // machine, so provincial campaign spending has to count here too. Targeted
+    // NA seats are dropped — those are specific constituencies, not PA ones.
+    const provincialCampaign: CampaignState | null = campaign
+      ? { ...campaign, targetedSeats: [], recruitedElectables: [], rejectedElectables: [] }
+      : null;
+    const raw = simulateElection(seats, playerParty ?? null, provincialCampaign, establishmentLean, seed + hashString(prov.id) * 104729, sharedSwing);
     const result = allocateReservedSeatsGeneric(raw, prov.paWomenSeats, prov.paMinoritySeats);
 
     const totalSeats = prov.paSeats + prov.paWomenSeats + prov.paMinoritySeats;
