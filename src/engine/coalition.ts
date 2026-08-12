@@ -84,7 +84,7 @@ function shuffle<T>(arr: T[], rand: Rand): T[] {
   return a;
 }
 
-export type GovernmentOutcome = 'MAJORITY' | 'COALITION' | 'MINORITY' | 'OPPOSITION' | 'FAILED';
+export type GovernmentOutcome = 'MAJORITY' | 'COALITION' | 'JUNIOR_PARTNER' | 'MINORITY' | 'OPPOSITION' | 'FAILED';
 
 export interface FormationResult {
   outcome: GovernmentOutcome;
@@ -93,6 +93,8 @@ export interface FormationResult {
   successChance: number;
   collapsed: boolean;
   narrative: string;
+  /** Set when a partner outweighs the player and takes the top job instead. */
+  seniorPartner: PartyId | null;
 }
 
 /**
@@ -118,7 +120,7 @@ export function resolveGovernmentFormation(
   const total = leaderSeats + acceptedPartners.reduce((s, p) => s + p.seats, 0) + independentsActuallyGained;
 
   if (leaderSeats >= NA_MAJORITY) {
-    return { outcome: 'MAJORITY', total, independentsActuallyGained, successChance: 1, collapsed: false, narrative: 'An outright majority — no coalition arithmetic required.' };
+    return { outcome: 'MAJORITY', total, independentsActuallyGained, successChance: 1, collapsed: false, seniorPartner: null, narrative: 'An outright majority — no coalition arithmetic required.' };
   }
 
   const partnerSeatTotal = acceptedPartners.reduce((s, p) => s + p.seats, 0);
@@ -126,32 +128,45 @@ export function resolveGovernmentFormation(
     ? acceptedPartners.reduce((s, p) => s + p.reliability * p.seats, 0) / partnerSeatTotal
     : 0.45;
 
+  // The largest party in a coalition takes the top job. Bringing in a partner
+  // bigger than you gets a government formed, but they lead it and you sit in
+  // cabinet as the junior partner rather than becoming Prime Minister.
+  const biggestPartner = acceptedPartners.reduce<CoalitionPartner | null>(
+    (best, p) => (!best || p.seats > best.seats ? p : best), null);
+  const seniorPartner = biggestPartner && biggestPartner.seats > leaderSeats ? biggestPartner.party : null;
+
   if (total >= NA_MAJORITY) {
-    const successChance = Math.max(0.08, Math.min(0.95, weightedReliability * 1.05 - 0.05 + establishmentBonus));
+    const successChance = Math.max(0.25, Math.min(0.96, weightedReliability * 1.15 + 0.18 + establishmentBonus));
     const collapsed = rand() > successChance;
     if (collapsed) {
       return {
-        outcome: 'FAILED', total, independentsActuallyGained, successChance, collapsed: true,
+        outcome: 'FAILED', total, independentsActuallyGained, successChance, collapsed: true, seniorPartner: null,
         narrative: 'The numbers were there, but talks collapsed before the vote — a partner walked out over unmet demands.',
       };
     }
-    return { outcome: 'COALITION', total, independentsActuallyGained, successChance, collapsed: false, narrative: 'The coalition holds together — for now.' };
+    if (seniorPartner) {
+      return {
+        outcome: 'JUNIOR_PARTNER', total, independentsActuallyGained, successChance, collapsed: false, seniorPartner,
+        narrative: 'A government is formed — but your larger partner takes the Prime Minister\'s office. You govern from inside the cabinet, not the top of it.',
+      };
+    }
+    return { outcome: 'COALITION', total, independentsActuallyGained, successChance, collapsed: false, seniorPartner: null, narrative: 'The coalition holds together — for now.' };
   }
 
   if (total >= NA_MAJORITY - 12) {
-    const successChance = Math.max(0.05, Math.min(0.6, weightedReliability * 0.7 + establishmentBonus));
+    const successChance = Math.max(0.15, Math.min(0.7, weightedReliability * 0.8 + 0.1 + establishmentBonus));
     const collapsed = rand() > successChance;
     if (collapsed) {
       return {
-        outcome: 'FAILED', total, independentsActuallyGained, successChance, collapsed: true,
+        outcome: 'FAILED', total, independentsActuallyGained, successChance, collapsed: true, seniorPartner: null,
         narrative: 'A minority government attempt failed to secure enough floor votes to be sworn in.',
       };
     }
-    return { outcome: 'MINORITY', total, independentsActuallyGained, successChance, collapsed: false, narrative: 'A minority government, surviving vote to vote.' };
+    return { outcome: 'MINORITY', total, independentsActuallyGained, successChance, collapsed: false, seniorPartner: null, narrative: 'A minority government, surviving vote to vote.' };
   }
 
   return {
-    outcome: 'FAILED', total, independentsActuallyGained, successChance: 0, collapsed: true,
+    outcome: 'FAILED', total, independentsActuallyGained, successChance: 0, collapsed: true, seniorPartner: null,
     narrative: 'Nowhere near enough seats. Government formation fails outright.',
   };
 }

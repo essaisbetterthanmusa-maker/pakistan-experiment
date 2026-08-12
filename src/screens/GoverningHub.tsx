@@ -159,6 +159,7 @@ const MAX_TERM_ACTIONS = 4;
 const OUTCOME_LABEL: Record<string, string> = {
   MAJORITY: 'Majority Government',
   COALITION: 'Coalition Government',
+  JUNIOR_PARTNER: 'Junior Coalition Partner',
   MINORITY: 'Minority Government',
   OPPOSITION: 'In Opposition',
   FAILED: 'Government Formation Failed',
@@ -233,8 +234,17 @@ export default function GoverningHub() {
     <div className="page-wrap">
       <div className="page-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h2>Governing — {PARTIES[playerParty].short}{leader ? ` · ${leader.name}` : ''}</h2>
-          <p>{OUTCOME_LABEL[government.outcome]} · {government.totalSeats} seats behind you</p>
+          <h2>
+            {government.seniorPartner ? 'In Government (Junior Partner)' : 'Governing'} — {PARTIES[playerParty].short}{leader ? ` · ${leader.name}` : ''}
+          </h2>
+          <p>{OUTCOME_LABEL[government.outcome]} · {government.totalSeats} seats behind the coalition</p>
+          {government.seniorPartner && (
+            <p style={{ color: 'var(--warn)', fontSize: 14, marginTop: 6 }}>
+              <b style={{ color: PARTIES[government.seniorPartner].color }}>{PARTIES[government.seniorPartner].short}</b> won
+              more seats than you and holds the Prime Minister's office. You sit in cabinet, carrying the government's
+              record without controlling it.
+            </p>
+          )}
         </div>
         <EstablishmentBadge />
       </div>

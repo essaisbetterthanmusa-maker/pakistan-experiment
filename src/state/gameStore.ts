@@ -24,6 +24,8 @@ export interface GovernmentState {
   partners: CoalitionPartner[];
   totalSeats: number;
   termYear: number;
+  /** Set when a bigger coalition partner holds the PM's office, not the player. */
+  seniorPartner: PartyId | null;
 }
 
 export interface Powerbroker {
@@ -310,13 +312,15 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
 
     set({
-      government: { outcome: result.outcome, partners: accepted, totalSeats: result.total, termYear: 0 },
+      government: { outcome: result.outcome, partners: accepted, totalSeats: result.total, termYear: 0, seniorPartner: result.seniorPartner },
       lastFormationResult: result,
       phase: 'GOVERNING',
       meters: {
         ...get().meters,
         oppositionStrength: result.outcome === 'MAJORITY' ? 35 : result.outcome === 'COALITION' ? 50 : 65,
-        partyUnity: result.outcome === 'MINORITY' ? 55 : 70,
+        // As the junior partner you carry the government's unpopularity
+        // without controlling it, and your own party resents the arrangement.
+        partyUnity: result.outcome === 'MINORITY' ? 55 : result.outcome === 'JUNIOR_PARTNER' ? 58 : 70,
       },
     });
   },
@@ -326,7 +330,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (!electionResult || !playerParty) return;
     const leaderSeats = electionResult.totalByParty[playerParty] ?? 0;
     set({
-      government: { outcome: 'MINORITY', partners: [], totalSeats: leaderSeats, termYear: 0 },
+      government: { outcome: 'MINORITY', partners: [], totalSeats: leaderSeats, termYear: 0, seniorPartner: null },
       lastFormationResult: null,
       phase: 'GOVERNING',
       meters: { ...get().meters, oppositionStrength: 78, partyUnity: 45, publicApproval: Math.max(20, get().meters.publicApproval - 10) },

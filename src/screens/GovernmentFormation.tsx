@@ -29,7 +29,13 @@ export default function GovernmentFormation() {
     .filter(id => electionResult.totalByParty[id] > 0)
     .sort((a, b) => electionResult.totalByParty[b] - electionResult.totalByParty[a]);
 
+  const largestParty = sortedParties.filter(id => id !== 'IND' && id !== 'OTH')[0] ?? null;
+  const isLargestParty = largestParty === playerParty;
+
   const acceptedPartners: CoalitionPartner[] = analysis.possiblePartners.filter(p => accepted.has(p.party));
+  // A partner bigger than you takes the PM's office, not you.
+  const biggestAccepted = acceptedPartners.reduce<CoalitionPartner | null>((b, p) => (!b || p.seats > b.seats ? p : b), null);
+  const wouldBeJunior = !!biggestAccepted && biggestAccepted.seats > analysis.leaderSeats;
   const projectedTotal = analysis.leaderSeats + acceptedPartners.reduce((s, p) => s + p.seats, 0) + Math.round(independentsAttempted * 0.65);
 
   const partnerSeatTotal = acceptedPartners.reduce((s, p) => s + p.seats, 0);
@@ -37,8 +43,8 @@ export default function GovernmentFormation() {
     ? acceptedPartners.reduce((s, p) => s + p.reliability * p.seats, 0) / partnerSeatTotal
     : 0.45;
   let previewChance = 0;
-  if (projectedTotal >= NA_MAJORITY) previewChance = Math.max(0.08, Math.min(0.95, weightedReliability * 1.05 - 0.05));
-  else if (projectedTotal >= NA_MAJORITY - 12) previewChance = Math.max(0.05, Math.min(0.6, weightedReliability * 0.7));
+  if (projectedTotal >= NA_MAJORITY) previewChance = Math.max(0.25, Math.min(0.96, weightedReliability * 1.15 + 0.18));
+  else if (projectedTotal >= NA_MAJORITY - 12) previewChance = Math.max(0.15, Math.min(0.7, weightedReliability * 0.8 + 0.1));
 
   function toggle(id: PartyId, refuses: boolean) {
     if (refuses) return;
@@ -79,14 +85,24 @@ export default function GovernmentFormation() {
           <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
             <button className="btn btn-danger" onClick={forceFreshElection}>Call Fresh Elections Instead</button>
             {formationAttempts >= 2 && (
-              <>
-                <button className="btn" onClick={forceMinorityGovernment}>Take Power Anyway — Weak Minority Government</button>
-                <button className="btn" onClick={() => fallToOpposition('You failed to form a government. A rival bloc took power and you sit in opposition.')}>
-                  Concede — Sit in Opposition
-                </button>
-              </>
+              <button className="btn" onClick={forceMinorityGovernment}>Take Power Anyway — Weak Minority Government</button>
             )}
           </div>
+        </div>
+      )}
+
+      {!analysis.hasMajorityAlone && !isLargestParty && (
+        <div className="card" style={{ marginBottom: 20, borderColor: 'var(--warn)' }}>
+          <h3 style={{ color: 'var(--warn)' }}>
+            You lost this election — {PARTIES[largestParty!].short} won the most seats
+          </h3>
+          <p style={{ fontSize: 14, margin: '8px 0 14px', color: 'var(--text)' }}>
+            You can still try to assemble a coalition and govern anyway, but you are entitled to lead the opposition
+            instead and spend the term fighting your way back into power.
+          </p>
+          <button className="btn" onClick={() => fallToOpposition(`${PARTIES[largestParty!].short} won the election and formed a government. You lead the opposition.`)}>
+            Sit in Opposition →
+          </button>
         </div>
       )}
 
@@ -130,6 +146,13 @@ export default function GovernmentFormation() {
             />
             <p style={{ fontSize: 12, color: 'var(--text-dimmer)', marginTop: 4 }}>Independents aren't a sure thing — expect roughly half to come through.</p>
           </div>
+
+          {wouldBeJunior && (
+            <p style={{ fontSize: 13, marginTop: 12, color: 'var(--warn)' }}>
+              ⚠ <b>{PARTIES[biggestAccepted!.party].short}</b> has {biggestAccepted!.seats} seats to your {analysis.leaderSeats}.
+              If this coalition forms, they take the Prime Minister's office and you govern as the junior partner.
+            </p>
+          )}
 
           <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <span>
