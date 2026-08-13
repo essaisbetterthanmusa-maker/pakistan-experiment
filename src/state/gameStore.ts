@@ -10,7 +10,7 @@ import { simulateElection } from '../engine/electionEngine';
 import { allocateReservedSeats } from '../engine/reservedSeats';
 import { analyzeCoalitionOptions, resolveGovernmentFormation, type CoalitionPartner, type GovernmentOutcome, type FormationResult } from '../engine/coalition';
 import { simulateProvincialAssemblies, type ProvincialAssemblyResult } from '../engine/provincialEngine';
-import { approximateSenateComposition } from '../engine/senate';
+import { approximateSenateComposition, SENATE_MAJORITY } from '../engine/senate';
 import { randomCandidateName } from '../data/constituencies';
 import { mulberry32 } from '../engine/random';
 import { generateClimate, type PoliticalClimate } from '../engine/politicalClimate';
@@ -32,7 +32,12 @@ export interface Powerbroker {
   name: string;
   region: string;
   loyalty: number;
+  /** Seats they personally control — what they take with them if they walk. */
+  bloc: number;
+  defected: boolean;
 }
+
+export const TERM_LENGTH_YEARS = 5;
 
 export interface GoverningMeters {
   publicApproval: number;
@@ -50,7 +55,15 @@ export interface GoverningAction {
   id: string;
   label: string;
   detail: string;
+  /** Needs to clear the Senate as well as the National Assembly. */
+  needsLegislation?: boolean;
   apply: (m: GoverningMeters) => Partial<GoverningMeters>;
+}
+
+export interface YearReport {
+  year: number;
+  events: string[];
+  forcedElection: boolean;
 }
 
 /** Player-initiated actions available while in opposition, building toward
@@ -107,7 +120,10 @@ interface GameState {
   callNextElection: () => void;
   forceFreshElection: () => void;
   courtEstablishment: () => { success: boolean; text: string };
-  takeGoverningAction: (action: GoverningAction) => void;
+  takeGoverningAction: (action: GoverningAction) => { passed: boolean; text: string };
+  advanceYear: () => YearReport;
+  appeasePowerbroker: (index: number) => { text: string };
+  senateSupport: () => { seats: number; hasMajority: boolean };
   fallToOpposition: (reason: string) => void;
   takeOppositionAction: (action: OppositionAction) => { text: string; toppled: boolean };
 }
@@ -156,6 +172,8 @@ function freshPowerbrokers(party: PartyId | null, seed: number): Powerbroker[] {
     name: randomCandidateName(rand),
     region: `${region} ${roles[Math.floor(rand() * roles.length)]}`,
     loyalty: 55 + Math.floor(rand() * 30),
+    bloc: 4 + Math.floor(rand() * 12),
+    defected: false,
   }));
 }
 
@@ -341,14 +359,135 @@ export const useGameStore = create<GameState>((set, get) => ({
     set(state => ({ meters: { ...state.meters, ...delta } }));
   },
 
+  /** The player's bloc in the Senate: their own party plus coalition partners. */
+  senateSupport: () => {
+    const { senateByParty, playerParty, government } = get();
+    if (!senateByParty || !playerParty) return { seats: 0, hasMajority: false };
+    let seats = senateByParty[playerParty] ?? 0;
+    for (const p of government?.partners ?? []) seats += senateByParty[p.party] ?? 0;
+    return { seats, hasMajority: seats >= SENATE_MAJORITY };
+  },
+
   takeGoverningAction: (action) => {
     const { meters, termActionsUsed } = get();
+
+    // Legislation has to clear the Senate too. Without a Senate majority the
+    // government can still try, but the upper house can block it outright —
+    // which is exactly why controlling provincial assemblies matters.
+    if (action.needsLegislation) {
+      const { seats, hasMajority } = get().senateSupport();
+      if (!hasMajority) {
+        const oddsOfPassing = 0.25 + (seats / SENATE_MAJORITY) * 0.4;
+        if (Math.random() > oddsOfPassing) {
+          set({
+            termActionsUsed: termActionsUsed + 1,
+            meters: { ...meters, publicApproval: Math.max(0, meters.publicApproval - 3) },
+          });
+          get().logCrisis(`Blocked in the Senate: ${action.label} — you hold ${seats}/${SENATE_MAJORITY} needed.`);
+          return {
+            passed: false,
+            text: `The Senate blocks it. You control ${seats} of the ${SENATE_MAJORITY} needed, and the opposition used the upper house to kill the bill.`,
+          };
+        }
+      }
+    }
+
     const delta = action.apply(meters);
     set({
       meters: { ...meters, ...delta },
       termActionsUsed: termActionsUsed + 1,
     });
     get().logCrisis(`Policy: ${action.label} — ${action.detail}`);
+    return { passed: true, text: `${action.label} is enacted.` };
+  },
+
+  /**
+   * Advances one year of the term. The economy drifts on its own, disloyal
+   * powerbrokers drift further, and one who falls far enough walks out with
+   * the seats they control. At the end of the term an election is forced.
+   */
+  advanceYear: () => {
+    const { government, meters, electionCycle } = get();
+    if (!government) return { year: 0, events: [], forcedElection: false };
+
+    const year = government.termYear + 1;
+    const events: string[] = [];
+    const e = meters.economy;
+
+    // Economy moves whether or not the player touched it.
+    const inflationDrift = (Math.random() * 3 - 1.2) + (e.reserves < 5 ? 1.5 : 0);
+    const growthDrift = (Math.random() * 0.8 - 0.35) - (e.inflation > 25 ? 0.3 : 0);
+    const reserveDrift = (Math.random() * 1.4 - 0.7) + (e.gdpGrowth > 3 ? 0.4 : -0.2);
+    const economy = {
+      inflation: Math.max(2, e.inflation + inflationDrift),
+      gdpGrowth: Math.max(-4, e.gdpGrowth + growthDrift),
+      reserves: Math.max(0, e.reserves + reserveDrift),
+    };
+    events.push(`Economy: inflation ${economy.inflation.toFixed(1)}%, growth ${economy.gdpGrowth.toFixed(1)}%, reserves $${economy.reserves.toFixed(1)}B.`);
+
+    // Living costs and a strong opposition grind approval down.
+    let publicApproval = meters.publicApproval - (economy.inflation > 22 ? 4 : 1) - (meters.oppositionStrength > 60 ? 3 : 0) + (economy.gdpGrowth > 3.5 ? 3 : 0);
+    let partyUnity = meters.partyUnity - 2;
+    let oppositionStrength = meters.oppositionStrength + (publicApproval < 40 ? 5 : 1);
+
+    // Powerbroker loyalty tracks party unity, and the disloyal drift away.
+    // Loyalty erodes on its own — patronage politics needs constant feeding.
+    // Only a genuinely united party slows the drift, and nothing but active
+    // appeasement reverses it, so brokers are a standing cost of governing.
+    let powerbrokers = meters.powerbrokers.map(pb => {
+      if (pb.defected) return pb;
+      const pull = -3.5 + (partyUnity - 70) * 0.22 + (Math.random() * 5 - 2.5);
+      return { ...pb, loyalty: Math.max(0, Math.min(100, pb.loyalty + pull)) };
+    });
+
+    let totalSeats = government.totalSeats;
+    powerbrokers = powerbrokers.map(pb => {
+      if (pb.defected || pb.loyalty >= 35) return pb;
+      if (Math.random() < 0.45) {
+        events.push(`${pb.name} (${pb.region}) has walked out, taking ${pb.bloc} seats with them.`);
+        totalSeats -= pb.bloc;
+        partyUnity = Math.max(0, partyUnity - 8);
+        oppositionStrength = Math.min(100, oppositionStrength + 6);
+        return { ...pb, defected: true };
+      }
+      return pb;
+    });
+
+    const forcedElection = year >= TERM_LENGTH_YEARS;
+    if (forcedElection) events.push('The assembly has completed its term. Elections must be held.');
+
+    set({
+      government: { ...government, termYear: year, totalSeats: Math.max(0, totalSeats) },
+      termActionsUsed: 0, // a fresh year, fresh agenda
+      meters: {
+        ...meters,
+        economy,
+        publicApproval: Math.max(0, Math.min(100, publicApproval)),
+        partyUnity: Math.max(0, Math.min(100, partyUnity)),
+        oppositionStrength: Math.max(0, Math.min(100, oppositionStrength)),
+        powerbrokers,
+        crisisLog: [{ year: electionCycle, text: `Year ${year}: ${events.join(' ')}` }, ...meters.crisisLog].slice(0, 20),
+      },
+    });
+    return { year, events, forcedElection };
+  },
+
+  appeasePowerbroker: (index) => {
+    const { meters } = get();
+    const pb = meters.powerbrokers[index];
+    if (!pb || pb.defected) return { text: '' };
+    const powerbrokers = meters.powerbrokers.map((p, i) =>
+      i === index ? { ...p, loyalty: Math.min(100, p.loyalty + 22) } : p);
+    set({
+      meters: {
+        ...meters,
+        powerbrokers,
+        // Patronage is never free — it costs money and looks like weakness.
+        publicApproval: Math.max(0, meters.publicApproval - 3),
+        economy: { ...meters.economy, reserves: Math.max(0, meters.economy.reserves - 0.8) },
+      },
+    });
+    return { text: `${pb.name} is brought back into the fold — a ministry, a development package, and no questions asked.` };
   },
 
   fallToOpposition: (reason) => {

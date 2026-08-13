@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGameStore, type GoverningAction } from '../state/gameStore';
+import { useGameStore, type GoverningAction, TERM_LENGTH_YEARS } from '../state/gameStore';
 import { PARTIES, type PartyId } from '../data/parties';
 import { PROVINCES, TOTAL_NA_SEATS } from '../data/provinces';
 import { SENATE_SEATS, SENATE_MAJORITY } from '../engine/senate';
@@ -85,6 +85,7 @@ const GOVERNING_ACTIONS: GoverningAction[] = [
   },
   {
     id: 'imf',
+    needsLegislation: true,
     label: 'Sign a new IMF programme',
     detail: 'Stabilises reserves and growth; austerity terms hurt at home.',
     apply: m => ({
@@ -135,6 +136,7 @@ const GOVERNING_ACTIONS: GoverningAction[] = [
   },
   {
     id: 'taxreform',
+    needsLegislation: true,
     label: 'Broaden the tax base',
     detail: 'The responsible choice nobody thanks you for.',
     apply: m => ({
@@ -145,6 +147,7 @@ const GOVERNING_ACTIONS: GoverningAction[] = [
   },
   {
     id: 'energy',
+    needsLegislation: true,
     label: 'Energy sector reform',
     detail: 'Tackles circular debt and loadshedding — slow, unglamorous, expensive up front.',
     apply: m => ({
@@ -154,7 +157,8 @@ const GOVERNING_ACTIONS: GoverningAction[] = [
   },
 ];
 
-const MAX_TERM_ACTIONS = 4;
+/** Policy moves available each year of the term, not per term. */
+const MAX_TERM_ACTIONS = 2;
 
 const OUTCOME_LABEL: Record<string, string> = {
   MAJORITY: 'Majority Government',
@@ -166,11 +170,13 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 export default function GoverningHub() {
-  const { government, meters, electionResult, playerParty, leader, provincialAssemblies, senateByParty, advanceGoverning, logCrisis, callNextElection, courtEstablishment, takeGoverningAction, termActionsUsed, fallToOpposition } = useGameStore();
+  const { government, meters, electionResult, playerParty, leader, provincialAssemblies, senateByParty, advanceGoverning, logCrisis, callNextElection, courtEstablishment, takeGoverningAction, termActionsUsed, fallToOpposition, advanceYear, appeasePowerbroker, senateSupport } = useGameStore();
   const [activeCrisis, setActiveCrisis] = useState<Crisis | null>(null);
   const [noConfidenceResult, setNoConfidenceResult] = useState<string | null>(null);
   const [establishmentNote, setEstablishmentNote] = useState<string | null>(null);
   const [usedActionIds, setUsedActionIds] = useState<string[]>([]);
+  const [actionNote, setActionNote] = useState<string | null>(null);
+  const [yearReport, setYearReport] = useState<{ year: number; events: string[]; forcedElection: boolean } | null>(null);
 
   if (!government || !electionResult || !playerParty) return null;
 
@@ -221,14 +227,22 @@ export default function GoverningHub() {
 
   function useAction(action: GoverningAction) {
     if (termActionsUsed >= MAX_TERM_ACTIONS || usedActionIds.includes(action.id)) return;
-    takeGoverningAction(action);
+    const res = takeGoverningAction(action);
+    setActionNote(res.text);
     setUsedActionIds(prev => [...prev, action.id]);
+  }
+
+  function nextYear() {
+    const rep = advanceYear();
+    setYearReport(rep);
+    setUsedActionIds([]); // new year, the agenda resets
+    setActionNote(null);
   }
 
   const sortedSenate = senateByParty
     ? (Object.keys(senateByParty) as PartyId[]).filter(id => senateByParty[id] > 0).sort((a, b) => senateByParty[b] - senateByParty[a])
     : [];
-  const senateForGov = senateByParty ? (senateByParty[playerParty] ?? 0) : 0;
+  const senate = senateSupport();
 
   return (
     <div className="page-wrap">
@@ -237,7 +251,9 @@ export default function GoverningHub() {
           <h2>
             {government.seniorPartner ? 'In Government (Junior Partner)' : 'Governing'} — {PARTIES[playerParty].short}{leader ? ` · ${leader.name}` : ''}
           </h2>
-          <p>{OUTCOME_LABEL[government.outcome]} · {government.totalSeats} seats behind the coalition</p>
+          <p>
+            {OUTCOME_LABEL[government.outcome]} · {government.totalSeats} seats behind the coalition · Year {government.termYear} of {TERM_LENGTH_YEARS}
+          </p>
           {government.seniorPartner && (
             <p style={{ color: 'var(--warn)', fontSize: 14, marginTop: 6 }}>
               <b style={{ color: PARTIES[government.seniorPartner].color }}>{PARTIES[government.seniorPartner].short}</b> won
@@ -261,17 +277,34 @@ export default function GoverningHub() {
             <button className="btn" onClick={newCrisis}>Face next political crisis</button>
             <button className="btn btn-danger" onClick={tryNoConfidence}>Opposition moves no-confidence</button>
             <button className="btn" onClick={() => setEstablishmentNote(courtEstablishment().text)}>Court the Establishment</button>
-            <button className="btn btn-primary" onClick={callNextElection}>Call the Next Election</button>
+            {government.termYear < TERM_LENGTH_YEARS ? (
+              <button className="btn btn-primary" onClick={nextYear}>Advance to Year {government.termYear + 1} →</button>
+            ) : (
+              <button className="btn btn-primary" onClick={callNextElection}>Term Over — Hold Elections</button>
+            )}
+            <button className="btn" onClick={callNextElection}>Call Early Elections</button>
           </div>
           {noConfidenceResult && <p style={{ fontSize: 14, marginTop: 12, color: 'var(--warn)' }}>{noConfidenceResult}</p>}
           {establishmentNote && <p style={{ fontSize: 14, marginTop: 12, color: 'var(--accent-2)' }}>{establishmentNote}</p>}
+          {yearReport && (
+            <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <b style={{ color: 'var(--accent-2)' }}>Year {yearReport.year} of {TERM_LENGTH_YEARS}</b>
+              {yearReport.events.map((ev, i) => (
+                <p key={i} style={{ fontSize: 13.5, color: 'var(--text-dim)', marginTop: 4 }}>{ev}</p>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="card">
           <h3 style={{ marginBottom: 12 }}>Senate of Pakistan</h3>
-          <p className="stat-line" style={{ marginBottom: 10 }}>
-            {senateForGov} / {SENATE_SEATS} seats · majority needs {SENATE_MAJORITY}. Elected indirectly by provincial assemblies in
-            staggered thirds — an NA majority never guarantees one here.
+          <p className="stat-line" style={{ marginBottom: 6 }}>
+            Your coalition holds <b style={{ color: senate.hasMajority ? 'var(--accent)' : 'var(--danger)' }}>{senate.seats}</b> of {SENATE_SEATS} · majority needs {SENATE_MAJORITY}.
+          </p>
+          <p className="stat-line" style={{ marginBottom: 10, color: senate.hasMajority ? 'var(--accent)' : 'var(--warn)' }}>
+            {senate.hasMajority
+              ? 'You control the upper house — legislation passes freely.'
+              : 'Without a Senate majority the opposition can block your legislation. Winning provincial assemblies is how you fix that.'}
           </p>
           {sortedSenate.map(id => (
             <div className="tally-row" key={id}>
@@ -286,10 +319,15 @@ export default function GoverningHub() {
       </div>
 
       <div className="card" style={{ marginTop: 18 }}>
-        <h3 style={{ marginBottom: 6 }}>Govern — policy agenda ({termActionsUsed}/{MAX_TERM_ACTIONS} used this term)</h3>
-        <p className="stat-line" style={{ marginBottom: 14 }}>
-          You cannot do everything in one term. Every option below buys you something and costs you something else.
+        <h3 style={{ marginBottom: 6 }}>Govern — policy agenda ({termActionsUsed}/{MAX_TERM_ACTIONS} used this year)</h3>
+        <p className="stat-line" style={{ marginBottom: 6 }}>
+          You cannot do everything in one year. Every option below buys you something and costs you something else.
         </p>
+        <p className="stat-line" style={{ marginBottom: 14 }}>
+          Items marked <span className="tag" style={{ color: 'var(--warn)' }}>SENATE</span> are legislation — without an
+          upper-house majority they can be blocked outright.
+        </p>
+        {actionNote && <p style={{ fontSize: 14, marginBottom: 12, color: 'var(--accent-2)' }}>{actionNote}</p>}
         <div className="panel-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
           {GOVERNING_ACTIONS.map(a => {
             const used = usedActionIds.includes(a.id);
@@ -303,8 +341,11 @@ export default function GoverningHub() {
                 style={{ display: 'block', textAlign: 'left', height: '100%', padding: '12px 14px' }}
               >
                 <b>{a.label}</b>
+                {a.needsLegislation && (
+                  <span className="tag" style={{ color: senate.hasMajority ? 'var(--accent)' : 'var(--warn)', marginLeft: 6 }}>SENATE</span>
+                )}
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4, fontWeight: 400, lineHeight: 1.45 }}>
-                  {used ? 'Already enacted this term.' : a.detail}
+                  {used ? 'Already on the agenda this year.' : a.detail}
                 </div>
               </button>
             );
@@ -358,11 +399,25 @@ export default function GoverningHub() {
 
       <div className="card" style={{ marginTop: 18 }}>
         <h3 style={{ marginBottom: 10 }}>Party powerbrokers</h3>
-        <p className="stat-line" style={{ marginBottom: 10 }}>Their loyalty tracks with party unity. Let it fall too far and they start organizing factions.</p>
+        <p className="stat-line" style={{ marginBottom: 10 }}>
+          Loyalty drifts with party unity each year. Below 35% they may walk out and take their seats with them —
+          buying them off costs money and makes you look weak.
+        </p>
         {meters.powerbrokers.map((pb, i) => (
-          <div key={i} className="seat-row">
-            <span><b>{pb.name}</b> — {pb.region}</span>
-            <span className="tag" style={{ color: pb.loyalty < 45 ? 'var(--danger)' : pb.loyalty < 65 ? 'var(--warn)' : 'var(--accent)' }}>loyalty {pb.loyalty}%</span>
+          <div key={i} className="seat-row" style={{ opacity: pb.defected ? 0.5 : 1 }}>
+            <span>
+              <b>{pb.name}</b> — {pb.region}
+              <span className="tag">{pb.bloc} seats</span>
+              {pb.defected && <span className="tag" style={{ color: 'var(--danger)' }}>DEFECTED</span>}
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="tag" style={{ color: pb.loyalty < 35 ? 'var(--danger)' : pb.loyalty < 60 ? 'var(--warn)' : 'var(--accent)' }}>
+                loyalty {pb.loyalty.toFixed(0)}%
+              </span>
+              {!pb.defected && pb.loyalty < 70 && (
+                <button className="btn btn-sm" onClick={() => setActionNote(appeasePowerbroker(i).text)}>Appease</button>
+              )}
+            </span>
           </div>
         ))}
       </div>
