@@ -30,7 +30,14 @@ export default function ElectionNight() {
   const lastRevealedIdx = useRef(0);
   const timerRef = useRef<number>(0);
 
-  useEffect(() => { if (!electionResult) runElection(); }, [electionResult, runElection]);
+  useEffect(() => {
+    if (electionResult) return;
+    // Defer to the next tick so the screen shell paints first — running the
+    // simulation synchronously on mount blocked the transition into election
+    // night long enough that switching from Campaign looked like a freeze.
+    const id = window.setTimeout(() => runElection(), 0);
+    return () => window.clearTimeout(id);
+  }, [electionResult, runElection]);
 
   const results = electionResult?.seatResults ?? [];
   const minTime = results[0]?.reportTimeMinutes ?? 0;

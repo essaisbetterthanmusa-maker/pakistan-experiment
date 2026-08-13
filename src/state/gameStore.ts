@@ -312,13 +312,22 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       provincial: raw.provincialSwing,
     }, climate ?? undefined, playerParty, campaign);
     const senateByParty = approximateSenateComposition(result.totalByParty, seed + electionCycle * 7919);
-    const explanation = playerParty
-      ? explainResult(seats, playerParty, campaign, establishmentLean, seed + electionCycle * 7919, result, climate)
-      : null;
-    set({ electionResult: result, provincialAssemblies, senateByParty, explanation });
+    set({ electionResult: result, provincialAssemblies, senateByParty });
   },
 
-  goToResults: () => set({ phase: 'RESULTS' }),
+  goToResults: () => {
+    // The seat-by-seat breakdown re-runs the election several times as a
+    // counterfactual (once per campaign input removed). That's fine once the
+    // count is already finished and the player is looking at a static results
+    // screen, but it's too much synchronous work to do the instant Election
+    // Night mounts — bundled into runElection() it blocked the transition
+    // into polling day long enough to look like the app had frozen.
+    const { seats, playerParty, campaign, establishmentLean, seed, electionCycle, climate, electionResult } = get();
+    const explanation = playerParty && electionResult
+      ? explainResult(seats, playerParty, campaign, establishmentLean, seed + electionCycle * 7919, electionResult, climate)
+      : null;
+    set({ phase: 'RESULTS', explanation });
+  },
   goToGovernmentFormation: () => set({ phase: 'GOVERNMENT_FORMATION' }),
 
   formGovernment: (accepted, independentsAttempted) => {
