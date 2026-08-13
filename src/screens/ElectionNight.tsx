@@ -28,7 +28,7 @@ export default function ElectionNight() {
   const [establishmentOfferOpen, setEstablishmentOfferOpen] = useState(false);
   const startRef = useRef<number | null>(null);
   const lastRevealedIdx = useRef(0);
-  const rafRef = useRef<number>(0);
+  const timerRef = useRef<number>(0);
 
   useEffect(() => { if (!electionResult) runElection(); }, [electionResult, runElection]);
 
@@ -41,9 +41,14 @@ export default function ElectionNight() {
 
   useEffect(() => {
     if (results.length === 0) return;
-    function tick(t: number) {
-      if (startRef.current === null) startRef.current = t;
-      const e = Math.min(1, (t - startRef.current) / DURATION_MS);
+    // Driven by wall-clock time on an interval rather than requestAnimationFrame:
+    // rAF is suspended entirely while the tab is in the background, which froze
+    // the whole count if the player switched away mid-election. setInterval keeps
+    // firing (throttled) when hidden, and reading Date.now() means the count is
+    // always correct for real elapsed time and catches up instantly on return.
+    function tick() {
+      if (startRef.current === null) startRef.current = Date.now();
+      const e = Math.min(1, (Date.now() - startRef.current) / DURATION_MS);
       setElapsed(e);
       const mappedMinutes = minTime + e * (maxTime - minTime);
       let idx = lastRevealedIdx.current;
@@ -58,10 +63,11 @@ export default function ElectionNight() {
         setEstablishmentOfferShown(true);
         setEstablishmentOfferOpen(true);
       }
-      if (e < 1) rafRef.current = requestAnimationFrame(tick);
+      if (e >= 1) window.clearInterval(timerRef.current);
     }
-    rafRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafRef.current);
+    tick();
+    timerRef.current = window.setInterval(tick, 120);
+    return () => window.clearInterval(timerRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results.length]);
 
