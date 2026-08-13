@@ -5,7 +5,7 @@ import { NA_MAJORITY } from '../data/provinces';
 import { SENATE_SEATS, SENATE_MAJORITY } from '../engine/senate';
 
 export default function ResultsScreen() {
-  const { electionResult, provincialAssemblies, senateByParty, goToGovernmentFormation } = useGameStore();
+  const { electionResult, provincialAssemblies, senateByParty, goToGovernmentFormation, explanation, playerParty } = useGameStore();
   if (!electionResult) return null;
 
   const sortedNational = (Object.keys(electionResult.totalByParty) as PartyId[])
@@ -38,6 +38,32 @@ export default function ResultsScreen() {
           </div>
         ))}
       </div>
+
+      {explanation && playerParty && (
+        <div className="card" style={{ marginBottom: 18, borderColor: 'var(--accent-2)' }}>
+          <h3 style={{ marginBottom: 4, color: 'var(--accent-2)' }}>Why {PARTIES[playerParty].short} got {explanation.finalSeats} seats</h3>
+          <p className="stat-line" style={{ marginBottom: 12 }}>
+            Running no campaign at all would have returned <b>{explanation.baselineSeats}</b> general seats. Seat figures
+            below are measured by re-running this exact election with each decision removed.
+          </p>
+          {explanation.factors.length === 0 && (
+            <p className="stat-line">You ran no campaign this cycle — the result is your party's raw standing.</p>
+          )}
+          {explanation.factors.map(f => (
+            <div key={f.label} className="seat-row" style={{ alignItems: 'flex-start' }}>
+              <span>
+                <b>{f.label}</b>
+                <div style={{ fontSize: 12.5, color: 'var(--text-dim)', marginTop: 2 }}>{f.detail}</div>
+              </span>
+              {!isNaN(f.seats) && (
+                <span className="tally-num" style={{ color: f.seats > 0 ? 'var(--accent)' : f.seats < 0 ? 'var(--danger)' : 'var(--text-dim)', width: 60 }}>
+                  {f.seats > 0 ? '+' : ''}{f.seats}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 18 }}>
         <h3 style={{ marginBottom: 4 }}>Provincial overview</h3>

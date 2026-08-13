@@ -222,6 +222,18 @@ button { font-family: inherit; cursor: pointer; }
 .stat-line { font-size: 14px; color: var(--text-dim); margin-top: 4px; }
 .stat-line b { color: var(--text); }
 
+.new-game-corner {
+  position: fixed;
+  top: 10px; right: 12px;
+  z-index: 50;
+  display: flex; align-items: center; gap: 8px;
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 5px 8px;
+  backdrop-filter: blur(6px);
+}
+
 .page-wrap { padding: 28px 24px; max-width: 1120px; margin: 0 auto; width: 100%; }
 .page-head { margin-bottom: 20px; }
 .page-head p { color: var(--text-dim); font-size: 14px; margin-top: 4px; }

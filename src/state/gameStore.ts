@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import { PARTIES, type PartyId } from '../data/parties';
 import type { ProvinceId } from '../data/provinces';
 import { generateConstituencies, type Constituency } from '../data/constituencies';
@@ -14,6 +15,7 @@ import { approximateSenateComposition, SENATE_MAJORITY } from '../engine/senate'
 import { randomCandidateName } from '../data/constituencies';
 import { mulberry32 } from '../engine/random';
 import { generateClimate, type PoliticalClimate } from '../engine/politicalClimate';
+import { explainResult, type ResultExplanation } from '../engine/explain';
 
 export type GamePhase =
   | 'START' | 'PARTY_SELECT' | 'CAMPAIGN' | 'ELECTION_NIGHT' | 'RESULTS'
@@ -101,6 +103,7 @@ interface GameState {
   termActionsUsed: number;
   opposition: OppositionState | null;
   climate: PoliticalClimate | null;
+  explanation: ResultExplanation | null;
 
   startNewGame: () => void;
   choosePartyAndLeader: (party: PartyId, leader: LeaderOption) => void;
@@ -189,7 +192,7 @@ function freshMeters(party: PartyId | null, seed: number): GoverningMeters {
   };
 }
 
-export const useGameStore = create<GameState>((set, get) => ({
+export const useGameStore = create<GameState>()(persist((set, get) => ({
   phase: 'START',
   seed: Date.now() % 1_000_000,
   playerParty: null,
@@ -208,6 +211,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   termActionsUsed: 0,
   opposition: null,
   climate: null,
+  explanation: null,
 
   startNewGame: () => {
     const seed = Math.floor(Math.random() * 1_000_000);
@@ -308,7 +312,10 @@ export const useGameStore = create<GameState>((set, get) => ({
       provincial: raw.provincialSwing,
     }, climate ?? undefined, playerParty, campaign);
     const senateByParty = approximateSenateComposition(result.totalByParty, seed + electionCycle * 7919);
-    set({ electionResult: result, provincialAssemblies, senateByParty });
+    const explanation = playerParty
+      ? explainResult(seats, playerParty, campaign, establishmentLean, seed + electionCycle * 7919, result, climate)
+      : null;
+    set({ electionResult: result, provincialAssemblies, senateByParty, explanation });
   },
 
   goToResults: () => set({ phase: 'RESULTS' }),
@@ -661,6 +668,14 @@ export const useGameStore = create<GameState>((set, get) => ({
       meters: { ...meters, oppositionStrength: Math.min(100, meters.oppositionStrength + 15) },
     });
   },
+}), {
+  name: 'pakistan-experiment-save',
+  storage: createJSONStorage(() => localStorage),
+  version: 1,
+  // Election night is a live, timed sequence — resuming mid-count would drop
+  // the player into a half-finished animation with no way to restart it, so
+  // that one phase rewinds to the campaign instead of being restored.
+  partialize: (s) => (s.phase === 'ELECTION_NIGHT' ? { ...s, phase: 'CAMPAIGN' as GamePhase } : s),
 }));
 
 export function coalitionAnalysisForCurrent() {
