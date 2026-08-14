@@ -172,6 +172,10 @@ const OUTCOME_LABEL: Record<string, string> = {
 export default function GoverningHub() {
   const { government, meters, electionResult, playerParty, leader, provincialAssemblies, senateByParty, advanceGoverning, logCrisis, callNextElection, courtEstablishment, takeGoverningAction, termActionsUsed, fallToOpposition, advanceYear, appeasePowerbroker, senateSupport } = useGameStore();
   const [activeCrisis, setActiveCrisis] = useState<Crisis | null>(null);
+  // A shuffled draw bag: every crisis fires once before any of them can
+  // repeat, instead of a plain random pick that could hand you the same
+  // crisis two or three times in a row.
+  const [crisisBag, setCrisisBag] = useState<Crisis[]>(() => shuffle(CRISES));
   const [noConfidenceResult, setNoConfidenceResult] = useState<string | null>(null);
   const [establishmentNote, setEstablishmentNote] = useState<string | null>(null);
   const [usedActionIds, setUsedActionIds] = useState<string[]>([]);
@@ -181,7 +185,11 @@ export default function GoverningHub() {
   if (!government || !electionResult || !playerParty) return null;
 
   function newCrisis() {
-    setActiveCrisis(CRISES[Math.floor(Math.random() * CRISES.length)]);
+    let bag = crisisBag;
+    if (bag.length === 0) bag = shuffle(CRISES);
+    const [next, ...rest] = bag;
+    setActiveCrisis(next);
+    setCrisisBag(rest);
   }
 
   function resolveCrisis(opt: CrisisOption) {
@@ -225,8 +233,15 @@ export default function GoverningHub() {
     }
   }
 
+  // A junior partner doesn't run the government — they get one seat at the
+  // table per year instead of two, and national legislation (IMF programme,
+  // tax reform, energy reform) is the senior partner's call, not theirs.
+  const isJunior = !!government.seniorPartner;
+  const maxActions = isJunior ? 1 : MAX_TERM_ACTIONS;
+
   function useAction(action: GoverningAction) {
-    if (termActionsUsed >= MAX_TERM_ACTIONS || usedActionIds.includes(action.id)) return;
+    if (termActionsUsed >= maxActions || usedActionIds.includes(action.id)) return;
+    if (isJunior && action.needsLegislation) return;
     const res = takeGoverningAction(action);
     setActionNote(res.text);
     setUsedActionIds(prev => [...prev, action.id]);
@@ -319,24 +334,32 @@ export default function GoverningHub() {
       </div>
 
       <div className="card" style={{ marginTop: 18 }}>
-        <h3 style={{ marginBottom: 6 }}>Govern — policy agenda ({termActionsUsed}/{MAX_TERM_ACTIONS} used this year)</h3>
+        <h3 style={{ marginBottom: 6 }}>Govern — policy agenda ({termActionsUsed}/{maxActions} used this year)</h3>
         <p className="stat-line" style={{ marginBottom: 6 }}>
           You cannot do everything in one year. Every option below buys you something and costs you something else.
         </p>
-        <p className="stat-line" style={{ marginBottom: 14 }}>
+        <p className="stat-line" style={{ marginBottom: isJunior ? 6 : 14 }}>
           Items marked <span className="tag" style={{ color: 'var(--warn)' }}>SENATE</span> are legislation — without an
           upper-house majority they can be blocked outright.
         </p>
+        {isJunior && (
+          <p className="stat-line" style={{ marginBottom: 14, color: 'var(--warn)' }}>
+            As the junior partner you get one move a year instead of two, and national legislation
+            (<span className="tag" style={{ color: 'var(--warn)' }}>SENATE</span> items) is {PARTIES[government.seniorPartner!].short}'s
+            call, not yours.
+          </p>
+        )}
         {actionNote && <p style={{ fontSize: 14, marginBottom: 12, color: 'var(--accent-2)' }}>{actionNote}</p>}
         <div className="panel-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
           {GOVERNING_ACTIONS.map(a => {
             const used = usedActionIds.includes(a.id);
-            const exhausted = termActionsUsed >= MAX_TERM_ACTIONS;
+            const exhausted = termActionsUsed >= maxActions;
+            const lockedForJunior = isJunior && a.needsLegislation;
             return (
               <button
                 key={a.id}
                 className="btn"
-                disabled={used || exhausted}
+                disabled={used || exhausted || lockedForJunior}
                 onClick={() => useAction(a)}
                 style={{ display: 'block', textAlign: 'left', height: '100%', padding: '12px 14px' }}
               >
@@ -345,7 +368,7 @@ export default function GoverningHub() {
                   <span className="tag" style={{ color: senate.hasMajority ? 'var(--accent)' : 'var(--warn)', marginLeft: 6 }}>SENATE</span>
                 )}
                 <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4, fontWeight: 400, lineHeight: 1.45 }}>
-                  {used ? 'Already on the agenda this year.' : a.detail}
+                  {used ? 'Already on the agenda this year.' : lockedForJunior ? `${PARTIES[government.seniorPartner!].short} decides this, not you.` : a.detail}
                 </div>
               </button>
             );
@@ -449,6 +472,15 @@ export default function GoverningHub() {
 }
 
 function clamp(v: number) { return Math.max(0, Math.min(100, v)); }
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 function Meter({ label, value, color }: { label: string; value: number; color: string }) {
   return (

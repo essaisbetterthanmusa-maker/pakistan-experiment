@@ -21,7 +21,7 @@ export default function OppositionScreen() {
 
   function act(a: OppositionAction) {
     const res = takeOppositionAction(a);
-    setNote(res.text);
+    setNote(res.govMoveText ? `${res.text}\n\n${res.govMoveText}` : res.text);
     if (res.toppled) setToppled(true);
   }
 
@@ -43,11 +43,14 @@ export default function OppositionScreen() {
           <h3 style={{ marginBottom: 12 }}>The struggle</h3>
           <Meter label="Your Movement's Momentum" value={opposition.momentum} color="var(--accent)" />
           <Meter label="Government Stability" value={opposition.govStability} color="var(--danger)" />
+          <Meter label={`${PARTIES[opposition.governingParty].short} Public Approval`} value={opposition.govApproval} color="var(--accent-2)" />
           <p className="stat-line" style={{ marginTop: 10 }}>
-            Public approval {meters.publicApproval.toFixed(0)}% · Party unity {meters.partyUnity.toFixed(0)}%
+            Your public approval {meters.publicApproval.toFixed(0)}% · Party unity {meters.partyUnity.toFixed(0)}%
           </p>
           <p className="stat-line">
-            A no-confidence motion succeeds more often the further your momentum sits above their stability.
+            The government keeps governing while you organize — it makes its own moves each turn. A no-confidence
+            motion succeeds more often the further your momentum sits above their stability, and a genuinely popular
+            government is harder to bring down even on shaky parliamentary footing.
           </p>
 
           {toppled ? (
@@ -65,7 +68,7 @@ export default function OppositionScreen() {
               <button className="btn btn-primary" onClick={callNextElection}>Wait for the Next Election →</button>
             </div>
           )}
-          {note && <p style={{ fontSize: 14, marginTop: 12, color: 'var(--accent-2)' }}>{note}</p>}
+          {note && <p style={{ fontSize: 14, marginTop: 12, color: 'var(--accent-2)', whiteSpace: 'pre-line' }}>{note}</p>}
         </div>
 
         <div className="card">

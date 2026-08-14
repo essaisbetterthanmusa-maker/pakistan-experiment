@@ -80,8 +80,33 @@ export interface OppositionState {
   governingParty: PartyId;
   momentum: number;      // 0-100, your opposition movement's strength
   govStability: number;  // 0-100, how secure the sitting government is
+  govApproval: number;   // 0-100, the sitting government's own standing — moves on its own
   log: string[];
   actionsTaken: number;
+  turnsElapsed: number;
+}
+
+interface GovernmentMove {
+  text: string;
+  stabilityDelta: number;
+  approvalDelta: number;
+}
+
+/**
+ * Things the sitting government does on its own initiative between the
+ * player's opposition moves, so the fight is against something that acts
+ * back rather than a meter that only ever moves when it's hit.
+ */
+function rollGovernmentMove(rand: () => number): GovernmentMove {
+  const r = rand();
+  if (r < 0.18) return { text: 'The government announces a popular subsidy package.', stabilityDelta: 7, approvalDelta: 8 };
+  if (r < 0.32) return { text: 'The government reshuffles its cabinet to shore up coalition support.', stabilityDelta: 9, approvalDelta: -2 };
+  if (r < 0.46) return { text: 'A corruption allegation breaks against a government minister.', stabilityDelta: -8, approvalDelta: -9 };
+  if (r < 0.58) return { text: 'Inflation ticks up again on the government\'s watch.', stabilityDelta: -3, approvalDelta: -6 };
+  if (r < 0.7) return { text: 'The government courts a coalition partner with fresh development funds.', stabilityDelta: 6, approvalDelta: -1 };
+  if (r < 0.8) return { text: 'A junior coalition partner publicly grumbles about being ignored.', stabilityDelta: -6, approvalDelta: -2 };
+  if (r < 0.9) return { text: 'The government secures a foreign investment announcement.', stabilityDelta: 5, approvalDelta: 6 };
+  return { text: 'A quiet week — the government mostly holds its ground.', stabilityDelta: 2, approvalDelta: 1 };
 }
 
 interface GameState {
@@ -128,7 +153,7 @@ interface GameState {
   appeasePowerbroker: (index: number) => { text: string };
   senateSupport: () => { seats: number; hasMajority: boolean };
   fallToOpposition: (reason: string) => void;
-  takeOppositionAction: (action: OppositionAction) => { text: string; toppled: boolean };
+  takeOppositionAction: (action: OppositionAction) => { text: string; toppled: boolean; govMoveText?: string };
 }
 
 const PROVINCE_IDS = PROVINCE_LIST.map(p => p.id);
@@ -520,8 +545,10 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
         governingParty: rival,
         momentum: Math.max(20, Math.min(70, meters.publicApproval * 0.6 + 15)),
         govStability: 65,
+        govApproval: 50,
         log: [reason],
         actionsTaken: 0,
+        turnsElapsed: 0,
       },
     });
   },
@@ -555,7 +582,10 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
         }
         break;
       case 'noconfidence': {
-        const chance = (opposition.momentum - opposition.govStability + 40) / 100;
+        // Uses the government's actual approval, not just its stability
+        // against your movement — a genuinely popular government is harder
+        // to bring down even if its parliamentary footing looks shaky.
+        const chance = (opposition.momentum - opposition.govStability + (50 - opposition.govApproval) * 0.4 + 40) / 100;
         if (roll < chance) {
           set({
             opposition: { ...opposition, log: ['The no-confidence motion succeeds — the government has fallen.', ...opposition.log], actionsTaken: opposition.actionsTaken + 1 },
@@ -590,18 +620,26 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
         break;
     }
 
+    // The government doesn't just sit there absorbing hits — it moves on its
+    // own between the player's turns, the same way a real sitting government
+    // keeps governing while the opposition organizes.
+    const govMove = rollGovernmentMove(Math.random);
+    const govMoveText = `${PARTIES[opposition.governingParty].short}: ${govMove.text}`;
+
     const next: OppositionState = {
       ...opposition,
       momentum: Math.max(0, Math.min(100, opposition.momentum + momentumDelta)),
-      govStability: Math.max(0, Math.min(100, opposition.govStability + stabilityDelta)),
-      log: [text, ...opposition.log].slice(0, 20),
+      govStability: Math.max(0, Math.min(100, opposition.govStability + stabilityDelta + govMove.stabilityDelta)),
+      govApproval: Math.max(0, Math.min(100, opposition.govApproval + govMove.approvalDelta)),
+      log: [govMoveText, text, ...opposition.log].slice(0, 20),
       actionsTaken: opposition.actionsTaken + 1,
+      turnsElapsed: opposition.turnsElapsed + 1,
     };
     set({
       opposition: next,
       meters: { ...meters, oppositionStrength: next.momentum },
     });
-    return { text, toppled: false };
+    return { text, toppled: false, govMoveText };
   },
 
   courtEstablishment: () => {
