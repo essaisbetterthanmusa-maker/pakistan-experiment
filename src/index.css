@@ -26,6 +26,13 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
+/* Any single flex/grid row that refuses to wrap on a narrow phone forces the
+   whole page's layout viewport to expand to fit it, which zooms the entire
+   app out and makes it horizontally scrollable — a "broken on phone" bug even
+   though nothing crashed. This is a backstop against that class of bug: it
+   doesn't fix a bad row, it just stops that row from taking the whole page
+   down with it. */
+html, body { max-width: 100vw; overflow-x: hidden; }
 body {
   margin: 0;
   background: var(--bg);
@@ -142,6 +149,7 @@ button { font-family: inherit; cursor: pointer; }
   padding: 18px 24px;
   border-bottom: 1px solid var(--border);
   display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 12px;
   background: var(--bg-panel);
 }
 .campaign-layout {
@@ -177,6 +185,7 @@ button { font-family: inherit; cursor: pointer; }
   grid-column: 1 / 4;
   background: var(--bg-panel);
   display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 10px;
   padding: 14px 24px;
 }
 .en-clock { font-family: var(--mono); font-size: 24px; color: var(--accent-2); font-weight: 700; }
