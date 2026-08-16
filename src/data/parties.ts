@@ -36,7 +36,7 @@ export const PARTIES: Record<PartyId, Party> = {
   PTI: {
     id: 'PTI', name: 'Pakistan Tehreek-e-Insaf', short: 'PTI', color: '#EB1C24',
     ideology: 'Populist, anti-establishment, youth/urban base',
-    provinceStrength: { Punjab: 1.04, Sindh: 0.35, KP: 1.08, Balochistan: 0.3, Islamabad: 1.05 },
+    provinceStrength: { Punjab: 1.04, Sindh: 0.35, KP: 0.98, Balochistan: 0.3, Islamabad: 1.05 },
     urbanSindhBoost: 0.25,
     establishmentAffinity: -2,
     playable: true,
@@ -45,7 +45,7 @@ export const PARTIES: Record<PartyId, Party> = {
   PPP: {
     id: 'PPP', name: 'Pakistan Peoples Party', short: 'PPP', color: '#E4181C',
     ideology: 'Centre-left, Sindh-based, federalist',
-    provinceStrength: { Punjab: 0.2, Sindh: 0.88, KP: 0.2, Balochistan: 0.35, Islamabad: 0.35 },
+    provinceStrength: { Punjab: 0.2, Sindh: 0.8, KP: 0.2, Balochistan: 0.35, Islamabad: 0.35 },
     urbanSindhBoost: -0.1,
     establishmentAffinity: 1,
     playable: true,

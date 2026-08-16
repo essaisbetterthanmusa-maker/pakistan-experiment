@@ -70,7 +70,7 @@ export function generateSeatsForProvince(rand: Rand, prov: ProvinceMeta, seatCou
   for (const d of prov.districts) {
     const lean: Record<string, number> = {};
     for (const pid of [...parties, 'IND' as PartyId]) {
-      lean[pid] = Math.max(0.15, 1 + gaussNoise(rand, 0.72));
+      lean[pid] = Math.max(0.1, 1 + gaussNoise(rand, 1.15));
     }
     districtLean[d] = lean;
   }

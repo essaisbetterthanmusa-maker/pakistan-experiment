@@ -60,7 +60,7 @@ export function simulateElection(
   for (const id of ALL_PARTY_IDS) {
     nationalSwing[id] = sharedSwing
       ? sharedSwing.national[id] + gaussNoise(rand, 1.1)
-      : gaussNoise(rand, 3.2);
+      : gaussNoise(rand, 4.8);
   }
   if (playerParty && campaign) {
     const efficiency = Math.min(1, campaign.spent / Math.max(1, campaign.totalBudget));
@@ -75,7 +75,7 @@ export function simulateElection(
     for (const id of ALL_PARTY_IDS) {
       provincialSwing[prov.id][id] = sharedSwing
         ? sharedSwing.provincial[prov.id][id] + gaussNoise(rand, 0.9)
-        : gaussNoise(rand, 2.4);
+        : gaussNoise(rand, 3.6);
     }
   }
 
@@ -95,7 +95,7 @@ export function simulateElection(
       for (const a of adjustments) if (a.party === slate.party) score += a.delta;
       score += (nationalSwing[slate.party] ?? 0) * seat.swingSensitivity * 0.5;
       score += (provincialSwing[seat.province][slate.party] ?? 0) * seat.swingSensitivity * 0.5;
-      score += gaussNoise(rand, 3.5); // seat-day uncertainty: turnout quirks, local news, weather
+      score += gaussNoise(rand, 4.8); // seat-day uncertainty: turnout quirks, local news, weather
       return { slate, score: Math.max(0.5, score) };
     });
 
