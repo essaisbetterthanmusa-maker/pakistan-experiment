@@ -454,8 +454,8 @@ export default function GoverningHub() {
       </div>
 
       {activeCrisis && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, padding: 20 }}>
-          <div className="card" style={{ maxWidth: 480 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20, overflowY: 'auto' }}>
+          <div className="card" style={{ maxWidth: 480, maxHeight: '85vh', overflowY: 'auto', margin: 'auto' }}>
             <h3>{activeCrisis.title}</h3>
             <p style={{ fontSize: 14, margin: '10px 0 16px', color: 'var(--text-dim)', lineHeight: 1.5 }}>{activeCrisis.body}</p>
             {activeCrisis.options.map(opt => (
