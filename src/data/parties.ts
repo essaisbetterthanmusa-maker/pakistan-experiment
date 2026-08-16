@@ -45,7 +45,7 @@ export const PARTIES: Record<PartyId, Party> = {
   PPP: {
     id: 'PPP', name: 'Pakistan Peoples Party', short: 'PPP', color: '#E4181C',
     ideology: 'Centre-left, Sindh-based, federalist',
-    provinceStrength: { Punjab: 0.2, Sindh: 0.8, KP: 0.2, Balochistan: 0.35, Islamabad: 0.35 },
+    provinceStrength: { Punjab: 0.2, Sindh: 0.7, KP: 0.2, Balochistan: 0.35, Islamabad: 0.35 },
     urbanSindhBoost: -0.1,
     establishmentAffinity: 1,
     playable: true,
@@ -54,8 +54,8 @@ export const PARTIES: Record<PartyId, Party> = {
   MQMP: {
     id: 'MQMP', name: 'Muttahida Qaumi Movement-Pakistan', short: 'MQM-P', color: '#D2001C',
     ideology: 'Urban Sindh, Mohajir representation',
-    provinceStrength: { Punjab: 0, Sindh: 0.3, KP: 0, Balochistan: 0, Islamabad: 0 },
-    urbanSindhBoost: 1.25,
+    provinceStrength: { Punjab: 0, Sindh: 0.34, KP: 0, Balochistan: 0, Islamabad: 0 },
+    urbanSindhBoost: 1.35,
     establishmentAffinity: 2,
     playable: true,
     description: 'Karachi and Hyderabad\'s urban Mohajir vote bank — weakened since its 2016 split but still a kingmaker in Sindh urban seats.',
