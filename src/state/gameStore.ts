@@ -3,19 +3,21 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { PARTIES, type PartyId } from '../data/parties';
 import type { ProvinceId } from '../data/provinces';
 import { generateConstituencies, type Constituency } from '../data/constituencies';
-import { PROVINCE_LIST } from '../data/provinces';
+import { PROVINCE_LIST, TOTAL_NA_SEATS } from '../data/provinces';
 import type { LeaderOption } from '../data/leaders';
 import { LEADERS_BY_PARTY } from '../data/leaders';
 import type { CampaignState, ElectionResult, EstablishmentStance } from '../engine/types';
+import { establishmentScore } from '../engine/types';
 import { simulateElection } from '../engine/electionEngine';
 import { allocateReservedSeats } from '../engine/reservedSeats';
 import { analyzeCoalitionOptions, resolveGovernmentFormation, type CoalitionPartner, type GovernmentOutcome, type FormationResult } from '../engine/coalition';
-import { simulateProvincialAssemblies, type ProvincialAssemblyResult } from '../engine/provincialEngine';
+import { simulateProvincialAssemblies, resolveGovernmentComposition, type ProvincialAssemblyResult } from '../engine/provincialEngine';
 import { approximateSenateComposition, SENATE_MAJORITY } from '../engine/senate';
 import { randomCandidateName } from '../data/constituencies';
 import { mulberry32 } from '../engine/random';
 import { generateClimate, type PoliticalClimate } from '../engine/politicalClimate';
 import { explainResult, type ResultExplanation } from '../engine/explain';
+import { runByElections } from '../engine/byElection';
 
 export type GamePhase =
   | 'START' | 'PARTY_SELECT' | 'CAMPAIGN' | 'ELECTION_NIGHT' | 'RESULTS'
@@ -66,6 +68,7 @@ export interface YearReport {
   year: number;
   events: string[];
   forcedElection: boolean;
+  noConfidenceAttempt?: { triggered: boolean; survived: boolean; govPower: number; oppPower: number };
 }
 
 /** Player-initiated actions available while in opposition, building toward
@@ -129,6 +132,7 @@ interface GameState {
   opposition: OppositionState | null;
   climate: PoliticalClimate | null;
   explanation: ResultExplanation | null;
+  byElectionLog: string[];
 
   startNewGame: () => void;
   choosePartyAndLeader: (party: PartyId, leader: LeaderOption) => void;
@@ -237,6 +241,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   opposition: null,
   climate: null,
   explanation: null,
+  byElectionLog: [],
 
   startNewGame: () => {
     const seed = Math.floor(Math.random() * 1_000_000);
@@ -260,6 +265,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       lastFormationResult: null,
       termActionsUsed: 0,
       opposition: null,
+      byElectionLog: [],
       establishmentLean,
     });
   },
@@ -448,11 +454,12 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
    * the seats they control. At the end of the term an election is forced.
    */
   advanceYear: () => {
-    const { government, meters, electionCycle } = get();
-    if (!government) return { year: 0, events: [], forcedElection: false };
+    const { government, meters, electionCycle, electionResult, provincialAssemblies, playerParty, byElectionLog } = get();
+    if (!government || !electionResult || !playerParty) return { year: 0, events: [], forcedElection: false };
 
     const year = government.termYear + 1;
     const events: string[] = [];
+    const newByElectionEvents: string[] = [];
     const e = meters.economy;
 
     // Economy moves whether or not the player touched it.
@@ -494,23 +501,127 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       return pb;
     });
 
+    // --- By-elections: NA seats fall vacant and get re-contested mid-term.
+    // Coalition parties carry a heavy structural anti-incumbency penalty, so
+    // the opposition wins most of them — this is what actually happens in
+    // Pakistani by-polls, not a neutral re-roll of the seat.
+    const coalitionParties: PartyId[] = [playerParty, ...government.partners.map(p => p.party)];
+    let updatedSeatResults = electionResult.seatResults;
+    let updatedTotalByParty = { ...electionResult.totalByParty };
+    const naByCount = Math.random() < 0.75 ? (Math.random() < 0.4 ? 2 : 1) : 0;
+    if (naByCount > 0) {
+      const naResults = runByElections(updatedSeatResults, naByCount, coalitionParties, publicApproval, Math.floor(Math.random() * 1_000_000));
+      for (const r of naResults) {
+        const prevInCoalition = coalitionParties.includes(r.previousWinner);
+        const newInCoalition = coalitionParties.includes(r.newWinner);
+        if (prevInCoalition && !newInCoalition) totalSeats -= 1;
+        if (!prevInCoalition && newInCoalition) totalSeats += 1;
+        updatedTotalByParty[r.previousWinner] = Math.max(0, (updatedTotalByParty[r.previousWinner] ?? 0) - 1);
+        updatedTotalByParty[r.newWinner] = (updatedTotalByParty[r.newWinner] ?? 0) + 1;
+        updatedSeatResults = updatedSeatResults.map(sr => sr.seat.id === r.seatId
+          ? { ...sr, winner: { party: r.newWinner, candidateName: r.winnerName, votes: sr.winner.votes, isElectable: sr.winner.isElectable, incumbent: false } }
+          : sr);
+        const line = r.flipped
+          ? `By-election, ${r.seatName}: vacant after ${r.vacancyReason} — ${PARTIES[r.newWinner].short}'s ${r.winnerName} takes it from ${PARTIES[r.previousWinner].short}.`
+          : `By-election, ${r.seatName}: vacant after ${r.vacancyReason} — ${PARTIES[r.newWinner].short} holds it.`;
+        events.push(line);
+        newByElectionEvents.push(line);
+        if (r.flipped) oppositionStrength = Math.min(100, oppositionStrength + (coalitionParties.includes(r.previousWinner) ? 4 : 1));
+      }
+    }
+
+    // --- By-elections: provincial assemblies, same anti-incumbency logic,
+    // applied against whichever party actually holds the Chief Minister's
+    // office there (or the largest bloc, if the assembly is already hung).
+    let updatedProvincialAssemblies = provincialAssemblies;
+    if (provincialAssemblies && Math.random() < 0.5) {
+      const provinces = Object.keys(provincialAssemblies) as ProvinceId[];
+      const prov = provinces[Math.floor(Math.random() * provinces.length)];
+      const pa = provincialAssemblies[prov];
+      const incumbentParty = pa.cmParty ?? pa.leadingParty;
+      if (incumbentParty && pa.result.seatResults.length > 0) {
+        const [r] = runByElections(pa.result.seatResults, 1, [incumbentParty], publicApproval, Math.floor(Math.random() * 1_000_000));
+        const totalByParty = { ...pa.result.totalByParty };
+        totalByParty[r.previousWinner] = Math.max(0, (totalByParty[r.previousWinner] ?? 0) - 1);
+        totalByParty[r.newWinner] = (totalByParty[r.newWinner] ?? 0) + 1;
+        const seatResults = pa.result.seatResults.map(sr => sr.seat.id === r.seatId
+          ? { ...sr, winner: { party: r.newWinner, candidateName: r.winnerName, votes: sr.winner.votes, isElectable: sr.winner.isElectable, incumbent: false } }
+          : sr);
+        const composition = resolveGovernmentComposition(totalByParty, pa.majority);
+        const cmChanged = composition.leadingParty !== pa.leadingParty || composition.hung !== pa.hung;
+        const newCmName = composition.hung ? null : (cmChanged ? randomCandidateName(mulberry32(Math.floor(Math.random() * 1_000_000))) : pa.cmName);
+        updatedProvincialAssemblies = {
+          ...provincialAssemblies,
+          [prov]: {
+            ...pa,
+            result: { ...pa.result, totalByParty, seatResults },
+            leadingParty: composition.leadingParty,
+            hasMajorityAlone: composition.hasMajorityAlone,
+            coalition: composition.coalition,
+            coalitionSeats: composition.coalitionSeats,
+            hung: composition.hung,
+            cmName: newCmName,
+            cmParty: composition.hung ? null : composition.leadingParty,
+            cmReal: false,
+          },
+        };
+        const line = r.flipped
+          ? `${prov} Assembly by-election, ${r.seatName}: vacant after ${r.vacancyReason} — ${PARTIES[r.newWinner].short} takes it from ${PARTIES[r.previousWinner].short}.${cmChanged ? (composition.hung ? ` The ${prov} Assembly is now hung.` : ` ${PARTIES[composition.leadingParty!].short} takes over as the leading party.`) : ''}`
+          : `${prov} Assembly by-election, ${r.seatName}: vacant after ${r.vacancyReason} — ${PARTIES[r.newWinner].short} holds it.`;
+        events.push(line);
+        newByElectionEvents.push(line);
+      }
+    }
+
     const forcedElection = year >= TERM_LENGTH_YEARS;
     if (forcedElection) events.push('The assembly has completed its term. Elections must be held.');
 
+    const clampedApproval = Math.max(0, Math.min(100, publicApproval));
+    const clampedUnity = Math.max(0, Math.min(100, partyUnity));
+    const clampedOpposition = Math.max(0, Math.min(100, oppositionStrength));
+    const finalTotalSeats = Math.max(0, totalSeats);
+
     set({
-      government: { ...government, termYear: year, totalSeats: Math.max(0, totalSeats) },
+      government: { ...government, termYear: year, totalSeats: finalTotalSeats },
+      electionResult: { ...electionResult, seatResults: updatedSeatResults, totalByParty: updatedTotalByParty },
+      provincialAssemblies: updatedProvincialAssemblies,
       termActionsUsed: 0, // a fresh year, fresh agenda
+      byElectionLog: [...newByElectionEvents, ...byElectionLog].slice(0, 30),
       meters: {
         ...meters,
         economy,
-        publicApproval: Math.max(0, Math.min(100, publicApproval)),
-        partyUnity: Math.max(0, Math.min(100, partyUnity)),
-        oppositionStrength: Math.max(0, Math.min(100, oppositionStrength)),
+        publicApproval: clampedApproval,
+        partyUnity: clampedUnity,
+        oppositionStrength: clampedOpposition,
         powerbrokers,
         crisisLog: [{ year: electionCycle, text: `Year ${year}: ${events.join(' ')}` }, ...meters.crisisLog].slice(0, 20),
       },
     });
-    return { year, events, forcedElection };
+
+    // --- Pressure-triggered no-confidence: the opposition calls one on its
+    // own once it's genuinely built the numbers, rather than the player
+    // clicking a button to attack their own government. The threshold and
+    // the vote itself both carry real uncertainty either way.
+    let noConfidenceAttempt: YearReport['noConfidenceAttempt'];
+    if (clampedOpposition >= 62) {
+      const triggerChance = Math.min(0.55, (clampedOpposition - 62) / 45 + 0.12);
+      if (Math.random() < triggerChance) {
+        const govShare = (finalTotalSeats / TOTAL_NA_SEATS) * 100;
+        const govPower = govShare - (100 - clampedUnity) * 0.3 + establishmentScore(meters.establishment) * 6;
+        const oppPower = clampedOpposition + (Math.random() * 30 - 15);
+        const survives = govPower > oppPower;
+        noConfidenceAttempt = { triggered: true, survived: survives, govPower: Math.round(govPower), oppPower: Math.round(oppPower) };
+        if (survives) {
+          set(s => ({ meters: { ...s.meters, partyUnity: Math.max(0, s.meters.partyUnity - 6), oppositionStrength: Math.max(0, s.meters.oppositionStrength - 10) } }));
+        } else {
+          get().fallToOpposition(
+            `The opposition called a no-confidence motion — pressure had been building all year — and won it ${Math.round(oppPower)} to ${Math.round(govPower)}. Your government has fallen.`
+          );
+        }
+      }
+    }
+
+    return { year, events, forcedElection, noConfidenceAttempt };
   },
 
   appeasePowerbroker: (index) => {
@@ -554,8 +665,18 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
   },
 
   takeOppositionAction: (action) => {
-    const { opposition, meters } = get();
+    const { opposition, meters, electionResult } = get();
     if (!opposition) return { text: '', toppled: false };
+
+    // A no-confidence motion is only a real option once the numbers are
+    // actually close — the opposition can't just call one on a whim before
+    // the pressure has genuinely built.
+    if (action.id === 'noconfidence' && opposition.momentum < opposition.govStability - 12) {
+      return {
+        text: 'Not yet. Your movement isn\'t strong enough relative to the government\'s standing for a motion to have a real chance — keep building pressure first.',
+        toppled: false,
+      };
+    }
 
     let momentumDelta = 0;
     let stabilityDelta = 0;
@@ -626,12 +747,36 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
     const govMove = rollGovernmentMove(Math.random);
     const govMoveText = `${PARTIES[opposition.governingParty].short}: ${govMove.text}`;
 
+    // Roughly a third of turns, a by-election lands — same anti-incumbency
+    // bias as while governing, so these are genuine ammunition for the
+    // player's own campaign against the sitting government.
+    let byElectionText: string | undefined;
+    let byElectionMomentum = 0;
+    let byElectionStability = 0;
+    if (electionResult && Math.random() < 0.35) {
+      const [r] = runByElections(electionResult.seatResults, 1, [opposition.governingParty], opposition.govApproval, Math.floor(Math.random() * 1_000_000));
+      if (r) {
+        const hurtGovernment = r.previousWinner === opposition.governingParty && r.newWinner !== opposition.governingParty;
+        if (hurtGovernment) {
+          byElectionMomentum = 8;
+          byElectionStability = -9;
+          byElectionText = `By-election, ${r.seatName}: vacant after ${r.vacancyReason} — ${PARTIES[r.newWinner].short}'s ${r.winnerName} takes it from the government. A visible sign the tide is turning.`;
+        } else if (r.previousWinner === opposition.governingParty) {
+          byElectionMomentum = -2;
+          byElectionStability = 3;
+          byElectionText = `By-election, ${r.seatName}: vacant after ${r.vacancyReason} — the government holds it.`;
+        } else {
+          byElectionText = `By-election, ${r.seatName}: vacant after ${r.vacancyReason} — ${PARTIES[r.newWinner].short} holds it against the government.`;
+        }
+      }
+    }
+
     const next: OppositionState = {
       ...opposition,
-      momentum: Math.max(0, Math.min(100, opposition.momentum + momentumDelta)),
-      govStability: Math.max(0, Math.min(100, opposition.govStability + stabilityDelta + govMove.stabilityDelta)),
+      momentum: Math.max(0, Math.min(100, opposition.momentum + momentumDelta + byElectionMomentum)),
+      govStability: Math.max(0, Math.min(100, opposition.govStability + stabilityDelta + govMove.stabilityDelta + byElectionStability)),
       govApproval: Math.max(0, Math.min(100, opposition.govApproval + govMove.approvalDelta)),
-      log: [govMoveText, text, ...opposition.log].slice(0, 20),
+      log: [...(byElectionText ? [byElectionText] : []), govMoveText, text, ...opposition.log].slice(0, 20),
       actionsTaken: opposition.actionsTaken + 1,
       turnsElapsed: opposition.turnsElapsed + 1,
     };
@@ -639,7 +784,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       opposition: next,
       meters: { ...meters, oppositionStrength: next.momentum },
     });
-    return { text, toppled: false, govMoveText };
+    return { text: byElectionText ? `${text}\n\n${byElectionText}` : text, toppled: false, govMoveText };
   },
 
   courtEstablishment: () => {
@@ -686,6 +831,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       lastFormationResult: null,
       termActionsUsed: 0,
       opposition: null,
+      byElectionLog: [],
     });
   },
 
@@ -712,6 +858,7 @@ export const useGameStore = create<GameState>()(persist((set, get) => ({
       lastFormationResult: null,
       termActionsUsed: 0,
       opposition: null,
+      byElectionLog: [],
       meters: { ...meters, oppositionStrength: Math.min(100, meters.oppositionStrength + 15) },
     });
   },

@@ -1,9 +1,8 @@
 import { useState } from 'react';
-import { useGameStore, type GoverningAction, TERM_LENGTH_YEARS } from '../state/gameStore';
+import { useGameStore, type GoverningAction, type YearReport, TERM_LENGTH_YEARS } from '../state/gameStore';
 import { PARTIES, type PartyId } from '../data/parties';
-import { PROVINCES, TOTAL_NA_SEATS } from '../data/provinces';
+import { PROVINCES } from '../data/provinces';
 import { SENATE_SEATS, SENATE_MAJORITY } from '../engine/senate';
-import { establishmentScore } from '../engine/types';
 import EstablishmentBadge from '../components/EstablishmentBadge';
 
 interface CrisisOption { label: string; effect: string; delta: Partial<{ publicApproval: number; partyUnity: number; oppositionStrength: number; inflation: number; reserves: number; gdpGrowth: number }>; }
@@ -266,17 +265,16 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 export default function GoverningHub() {
-  const { government, meters, electionResult, playerParty, leader, provincialAssemblies, senateByParty, advanceGoverning, logCrisis, callNextElection, courtEstablishment, takeGoverningAction, termActionsUsed, fallToOpposition, advanceYear, appeasePowerbroker, senateSupport } = useGameStore();
+  const { government, meters, electionResult, playerParty, leader, provincialAssemblies, senateByParty, advanceGoverning, logCrisis, callNextElection, courtEstablishment, takeGoverningAction, termActionsUsed, advanceYear, appeasePowerbroker, senateSupport, byElectionLog } = useGameStore();
   const [activeCrisis, setActiveCrisis] = useState<Crisis | null>(null);
   // A shuffled draw bag: every crisis fires once before any of them can
   // repeat, instead of a plain random pick that could hand you the same
   // crisis two or three times in a row.
   const [crisisBag, setCrisisBag] = useState<Crisis[]>(() => shuffle(CRISES));
-  const [noConfidenceResult, setNoConfidenceResult] = useState<string | null>(null);
   const [establishmentNote, setEstablishmentNote] = useState<string | null>(null);
   const [usedActionIds, setUsedActionIds] = useState<string[]>([]);
   const [actionNote, setActionNote] = useState<string | null>(null);
-  const [yearReport, setYearReport] = useState<{ year: number; events: string[]; forcedElection: boolean } | null>(null);
+  const [yearReport, setYearReport] = useState<YearReport | null>(null);
 
   if (!government || !electionResult || !playerParty) return null;
 
@@ -303,31 +301,6 @@ export default function GoverningHub() {
     });
     logCrisis(`${activeCrisis.title}: chose "${opt.label}" — ${opt.effect}`);
     setActiveCrisis(null);
-  }
-
-  function tryNoConfidence() {
-    if (!government) return;
-    // Both sides have to be measured on the same scale. Government strength is
-    // its share of the 336-seat house, not a raw seat count — comparing a raw
-    // count against a 0-100 opposition meter made the government unlosable.
-    const govShare = (government.totalSeats / TOTAL_NA_SEATS) * 100;
-    // Disloyal backbenchers are exactly who abstains or crosses the floor,
-    // and a government the establishment is backing survives votes it
-    // otherwise wouldn't.
-    const govPower = govShare
-      - (100 - meters.partyUnity) * 0.28
-      + establishmentScore(meters.establishment) * 6;
-    const oppPower = meters.oppositionStrength + (Math.random() * 24 - 12);
-    if (govPower > oppPower) {
-      setNoConfidenceResult(
-        `The motion fails — ${govPower.toFixed(0)} against ${oppPower.toFixed(0)}. The government survives, but the opposition has shown its hand.`
-      );
-      advanceGoverning({ partyUnity: clamp(meters.partyUnity - 5), oppositionStrength: clamp(meters.oppositionStrength - 8) });
-    } else {
-      fallToOpposition(
-        `Your government lost a no-confidence vote (${govPower.toFixed(0)} against ${oppPower.toFixed(0)}). You are now in opposition.`
-      );
-    }
   }
 
   // A junior partner doesn't run the government — they get one seat at the
@@ -384,10 +357,14 @@ export default function GoverningHub() {
           <Meter label="Party Unity" value={meters.partyUnity} color="var(--accent-2)" />
           <Meter label="Opposition Strength" value={meters.oppositionStrength} color="var(--danger)" />
           <p className="stat-line">Inflation {meters.economy.inflation.toFixed(1)}% · GDP growth {meters.economy.gdpGrowth.toFixed(1)}% · Reserves ${meters.economy.reserves.toFixed(1)}B</p>
+          <p className="stat-line" style={{ marginTop: 6 }}>
+            {meters.oppositionStrength >= 62
+              ? <span style={{ color: 'var(--danger)' }}>The opposition has real numbers now — expect them to call a no-confidence motion on their own initiative.</span>
+              : 'The opposition doesn\'t have the numbers to move against you yet — no-confidence isn\'t something you trigger, it\'s something they will when pressure builds.'}
+          </p>
 
           <div style={{ display: 'flex', gap: 10, marginTop: 18, flexWrap: 'wrap' }}>
             <button className="btn" onClick={newCrisis}>Face next political crisis</button>
-            <button className="btn btn-danger" onClick={tryNoConfidence}>Opposition moves no-confidence</button>
             <button className="btn" onClick={() => setEstablishmentNote(courtEstablishment().text)}>Court the Establishment</button>
             {government.termYear < TERM_LENGTH_YEARS ? (
               <button className="btn btn-primary" onClick={nextYear}>Advance to Year {government.termYear + 1} →</button>
@@ -396,7 +373,6 @@ export default function GoverningHub() {
             )}
             <button className="btn" onClick={callNextElection}>Call Early Elections</button>
           </div>
-          {noConfidenceResult && <p style={{ fontSize: 14, marginTop: 12, color: 'var(--warn)' }}>{noConfidenceResult}</p>}
           {establishmentNote && <p style={{ fontSize: 14, marginTop: 12, color: 'var(--accent-2)' }}>{establishmentNote}</p>}
           {yearReport && (
             <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -404,6 +380,16 @@ export default function GoverningHub() {
               {yearReport.events.map((ev, i) => (
                 <p key={i} style={{ fontSize: 13.5, color: 'var(--text-dim)', marginTop: 4 }}>{ev}</p>
               ))}
+              {yearReport.noConfidenceAttempt && (
+                <p style={{
+                  fontSize: 14, marginTop: 8, fontWeight: 600,
+                  color: yearReport.noConfidenceAttempt.survived ? 'var(--warn)' : 'var(--danger)',
+                }}>
+                  {yearReport.noConfidenceAttempt.survived
+                    ? `The opposition moved a no-confidence motion — it failed, ${yearReport.noConfidenceAttempt.govPower} against ${yearReport.noConfidenceAttempt.oppPower}. You survive, weakened.`
+                    : `The opposition moved a no-confidence motion and WON, ${yearReport.noConfidenceAttempt.oppPower} against ${yearReport.noConfidenceAttempt.govPower}.`}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -547,6 +533,19 @@ export default function GoverningHub() {
         {meters.crisisLog.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-dim)' }}>Nothing yet — the government is still finding its feet.</p>}
         {meters.crisisLog.map((c, i) => (
           <div key={i} className="wire-item"><div className="wire-time">Term year {c.year}</div><div>{c.text}</div></div>
+        ))}
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <h3 style={{ marginBottom: 10 }}>By-elections</h3>
+        <p className="stat-line" style={{ marginBottom: 10 }}>
+          Seats fall vacant year to year — resignations, deaths, disqualifications, defections. By-polls are brutal
+          for whoever holds power: low turnout, pure protest voting, and the opposition wins most of them almost
+          regardless of your approval rating.
+        </p>
+        {byElectionLog.length === 0 && <p style={{ fontSize: 14, color: 'var(--text-dim)' }}>No by-elections yet.</p>}
+        {byElectionLog.map((l, i) => (
+          <div key={i} className="wire-item"><div>{l}</div></div>
         ))}
       </div>
 

@@ -73,25 +73,7 @@ export function simulateProvincialAssemblies(
 
     const totalSeats = prov.paSeats + prov.paWomenSeats + prov.paMinoritySeats;
     const majority = Math.floor(totalSeats / 2) + 1;
-
-    const ranked = (Object.keys(result.totalByParty) as PartyId[])
-      .filter(id => result.totalByParty[id] > 0 && id !== 'IND')
-      .sort((a, b) => result.totalByParty[b] - result.totalByParty[a]);
-
-    const leadingParty = ranked[0] ?? null;
-    const leadingSeats = leadingParty ? result.totalByParty[leadingParty] : 0;
-    const hasMajorityAlone = leadingSeats >= majority;
-
-    const coalition: { party: PartyId; seats: number }[] = [];
-    let coalitionSeats = leadingSeats;
-    if (!hasMajorityAlone && leadingParty) {
-      for (const id of ranked.slice(1)) {
-        if (coalitionSeats >= majority) break;
-        coalition.push({ party: id, seats: result.totalByParty[id] });
-        coalitionSeats += result.totalByParty[id];
-      }
-    }
-    const hung = leadingParty === null || coalitionSeats < majority;
+    const { leadingParty, hasMajorityAlone, coalition, coalitionSeats, hung } = resolveGovernmentComposition(result.totalByParty, majority);
 
     const rand = mulberry32(seed + hashString(prov.id) * 65537 + 7);
     const knownCm = leadingParty ? KNOWN_CM_CANDIDATES[prov.id]?.[leadingParty] : undefined;
@@ -121,4 +103,31 @@ function hashString(s: string) {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return Math.abs(h);
+}
+
+/**
+ * The largest-party-tries-alone-then-builds-a-coalition logic, factored out
+ * so it can be re-run after by-elections shift seat counts mid-term without
+ * duplicating it.
+ */
+export function resolveGovernmentComposition(totalByParty: Record<PartyId, number>, majority: number) {
+  const ranked = (Object.keys(totalByParty) as PartyId[])
+    .filter(id => totalByParty[id] > 0 && id !== 'IND')
+    .sort((a, b) => totalByParty[b] - totalByParty[a]);
+
+  const leadingParty = ranked[0] ?? null;
+  const leadingSeats = leadingParty ? totalByParty[leadingParty] : 0;
+  const hasMajorityAlone = leadingSeats >= majority;
+
+  const coalition: { party: PartyId; seats: number }[] = [];
+  let coalitionSeats = leadingSeats;
+  if (!hasMajorityAlone && leadingParty) {
+    for (const id of ranked.slice(1)) {
+      if (coalitionSeats >= majority) break;
+      coalition.push({ party: id, seats: totalByParty[id] });
+      coalitionSeats += totalByParty[id];
+    }
+  }
+  const hung = leadingParty === null || coalitionSeats < majority;
+  return { leadingParty, hasMajorityAlone, coalition, coalitionSeats, hung };
 }

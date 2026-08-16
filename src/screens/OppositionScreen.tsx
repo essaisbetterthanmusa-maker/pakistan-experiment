@@ -19,6 +19,8 @@ export default function OppositionScreen() {
 
   if (!opposition || !playerParty) return null;
 
+  const noConfidenceReady = opposition.momentum >= opposition.govStability - 12;
+
   function act(a: OppositionAction) {
     const res = takeOppositionAction(a);
     setNote(res.govMoveText ? `${res.text}\n\n${res.govMoveText}` : res.text);
@@ -75,20 +77,23 @@ export default function OppositionScreen() {
           <h3 style={{ marginBottom: 6 }}>Opposition playbook</h3>
           <p className="stat-line" style={{ marginBottom: 12 }}>Actions taken: {opposition.actionsTaken}</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {OPPOSITION_ACTIONS.map(a => (
-              <button
-                key={a.id}
-                className={a.id === 'noconfidence' ? 'btn btn-danger' : 'btn'}
-                disabled={toppled}
-                onClick={() => act(a)}
-                style={{ display: 'block', textAlign: 'left', padding: '12px 14px' }}
-              >
-                <b>{a.label}</b>
-                <div style={{ fontSize: 12, color: a.id === 'noconfidence' ? 'rgba(255,255,255,.8)' : 'var(--text-dim)', marginTop: 4, fontWeight: 400, lineHeight: 1.45 }}>
-                  {a.detail}
-                </div>
-              </button>
-            ))}
+            {OPPOSITION_ACTIONS.map(a => {
+              const gated = a.id === 'noconfidence' && !noConfidenceReady;
+              return (
+                <button
+                  key={a.id}
+                  className={a.id === 'noconfidence' ? 'btn btn-danger' : 'btn'}
+                  disabled={toppled || gated}
+                  onClick={() => act(a)}
+                  style={{ display: 'block', textAlign: 'left', padding: '12px 14px', opacity: gated ? 0.55 : 1 }}
+                >
+                  <b>{a.label}</b>
+                  <div style={{ fontSize: 12, color: a.id === 'noconfidence' ? 'rgba(255,255,255,.8)' : 'var(--text-dim)', marginTop: 4, fontWeight: 400, lineHeight: 1.45 }}>
+                    {gated ? 'Not yet — your momentum needs to be close to their stability before a motion has any real chance.' : a.detail}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
