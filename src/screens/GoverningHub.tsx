@@ -6,7 +6,7 @@ import { SENATE_SEATS, SENATE_MAJORITY } from '../engine/senate';
 import { establishmentScore } from '../engine/types';
 import EstablishmentBadge from '../components/EstablishmentBadge';
 
-interface CrisisOption { label: string; effect: string; delta: Partial<{ publicApproval: number; partyUnity: number; oppositionStrength: number; inflation: number; reserves: number }>; }
+interface CrisisOption { label: string; effect: string; delta: Partial<{ publicApproval: number; partyUnity: number; oppositionStrength: number; inflation: number; reserves: number; gdpGrowth: number }>; }
 interface Crisis { title: string; body: string; options: CrisisOption[]; }
 
 const CRISES: Crisis[] = [
@@ -65,6 +65,102 @@ const CRISES: Crisis[] = [
     options: [
       { label: 'Comply quietly', effect: 'Approval dips, crisis passes', delta: { publicApproval: -4 } },
       { label: 'Publicly criticize the judiciary', effect: 'Base energized, institutions alarmed', delta: { publicApproval: 3, oppositionStrength: 7 } },
+    ],
+  },
+  {
+    title: 'Currency in Free Fall',
+    body: 'The rupee slides again against the dollar overnight. Importers are panicking and the opposition is calling it economic mismanagement.',
+    options: [
+      { label: 'Burn reserves to defend the rate', effect: 'Steadies the currency, drains the reserve buffer', delta: { reserves: -3, publicApproval: 4 } },
+      { label: 'Let it float', effect: 'Reserves untouched, inflation bites harder', delta: { inflation: 3, publicApproval: -6 } },
+    ],
+  },
+  {
+    title: 'Major Flooding',
+    body: 'Monsoon flooding has displaced tens of thousands in the south. Relief camps are overwhelmed and international donors are watching the response.',
+    options: [
+      { label: 'Declare a national emergency and mobilise funds', effect: 'Costs reserves, wins genuine goodwill', delta: { reserves: -2.5, publicApproval: 9 } },
+      { label: 'Route it through provincial governments', effect: 'Cheaper for the centre, slower relief, blame spreads', delta: { publicApproval: -5, oppositionStrength: 4 } },
+    ],
+  },
+  {
+    title: 'Security Forces Operation',
+    body: 'A major security operation in a militant-affected district draws both praise and accusations of civilian casualties.',
+    options: [
+      { label: 'Back the operation publicly', effect: 'Establishment pleased, human-rights criticism grows', delta: { publicApproval: -3, oppositionStrength: -4 } },
+      { label: 'Call for an independent inquiry', effect: 'Rights groups relieved, security establishment cold-shoulders you', delta: { publicApproval: 3, oppositionStrength: 5 } },
+    ],
+  },
+  {
+    title: 'Cabinet Minister Resigns',
+    body: 'A senior minister resigns abruptly, citing "differences over policy direction." Rumours point to something uglier.',
+    options: [
+      { label: 'Accept quietly and reshuffle', effect: 'Contained, but looks like disarray', delta: { partyUnity: -4, publicApproval: -2 } },
+      { label: 'Publicly dispute their reasons', effect: 'Fights the narrative, risks an ugly public spat', delta: { partyUnity: -8, oppositionStrength: 5 } },
+    ],
+  },
+  {
+    title: 'Electricity Loadshedding Crisis',
+    body: 'Extended power outages hit major cities in peak summer heat. Traders\' associations are threatening a shutter-down strike.',
+    options: [
+      { label: 'Emergency fuel purchase to fill the gap', effect: 'Keeps the lights on, burns reserves', delta: { reserves: -2, publicApproval: 5 } },
+      { label: 'Ration supply to industry first', effect: 'Protects exports, public anger spikes', delta: { publicApproval: -8, gdpGrowth: 0.3 } },
+    ],
+  },
+  {
+    title: 'Census and Delimitation Dispute',
+    body: 'A province disputes the new census figures, arguing it will lose National Assembly seats unfairly in the next delimitation.',
+    options: [
+      { label: 'Order a partial recount', effect: 'Defuses tension, costs time and money', delta: { reserves: -1, publicApproval: 2 } },
+      { label: 'Uphold the existing count', effect: 'Efficient, deepens provincial resentment', delta: { oppositionStrength: 6, publicApproval: -3 } },
+    ],
+  },
+  {
+    title: 'Journalist Crackdown Backlash',
+    body: 'A prominent journalist is detained after criticising the government. Press freedom groups and foreign media are covering it heavily.',
+    options: [
+      { label: 'Release them and drop charges', effect: 'Defuses the story, embarrasses the agencies involved', delta: { publicApproval: 4, oppositionStrength: -2 } },
+      { label: 'Let the case proceed', effect: 'Establishment relations improve, international image suffers', delta: { publicApproval: -6 } },
+    ],
+  },
+  {
+    title: 'CPEC Project Dispute',
+    body: 'A CPEC-linked power project demands a tariff renegotiation, threatening to halt work and stoke a diplomatic incident.',
+    options: [
+      { label: 'Renegotiate the tariff', effect: 'Keeps the project alive, costs the exchequer', delta: { reserves: -2, publicApproval: 2 } },
+      { label: 'Hold firm on the original terms', effect: 'Saves money, risks the relationship and the project', delta: { reserves: 1, oppositionStrength: 4 } },
+    ],
+  },
+  {
+    title: 'Mass Protest Movement',
+    body: 'A grassroots protest movement — nominally about fuel prices, really about everything — is gathering serious numbers in the capital.',
+    options: [
+      { label: 'Negotiate with organisers', effect: 'Defuses the movement, looks reactive', delta: { publicApproval: 3, oppositionStrength: -3 } },
+      { label: 'Deploy police to clear the sit-in', effect: 'Restores order fast, footage goes viral for the wrong reasons', delta: { publicApproval: -9, oppositionStrength: 6 } },
+    ],
+  },
+  {
+    title: 'Provincial Chief Minister Defies the Centre',
+    body: 'A Chief Minister from an opposing party publicly refuses to implement a federal directive, calling it unconstitutional overreach.',
+    options: [
+      { label: 'Take it to the courts', effect: 'Institutionally proper, drags on for months', delta: { publicApproval: -2 } },
+      { label: 'Cut discretionary funding to that province', effect: 'Asserts authority, guarantees a lasting grudge', delta: { oppositionStrength: 7, publicApproval: -4 } },
+    ],
+  },
+  {
+    title: 'Senate Blocks a Key Bill',
+    body: 'The opposition-heavy Senate votes down a bill your government considers essential. State media calls it obstruction; critics call it democracy working.',
+    options: [
+      { label: 'Reintroduce it as a money bill', effect: 'A procedural workaround — legally grey, politically loud', delta: { oppositionStrength: 5, publicApproval: -2 } },
+      { label: 'Negotiate amendments with the Senate', effect: 'Slower, but holds up better', delta: { partyUnity: -2, publicApproval: 2 } },
+    ],
+  },
+  {
+    title: 'Diplomatic Incident',
+    body: 'A border skirmish or diplomatic snub with a neighbouring state is dominating the news cycle and testing the government\'s composure.',
+    options: [
+      { label: 'De-escalate quietly through back channels', effect: 'Calms things down, looks weak to hawks at home', delta: { publicApproval: -3 } },
+      { label: 'Respond firmly and publicly', effect: 'Plays well domestically, raises the temperature', delta: { publicApproval: 6, oppositionStrength: -2 } },
     ],
   },
 ];
@@ -202,6 +298,7 @@ export default function GoverningHub() {
         ...meters.economy,
         inflation: Math.max(0, meters.economy.inflation + (opt.delta.inflation ?? 0)),
         reserves: Math.max(0, meters.economy.reserves + (opt.delta.reserves ?? 0)),
+        gdpGrowth: meters.economy.gdpGrowth + (opt.delta.gdpGrowth ?? 0),
       },
     });
     logCrisis(`${activeCrisis.title}: chose "${opt.label}" — ${opt.effect}`);

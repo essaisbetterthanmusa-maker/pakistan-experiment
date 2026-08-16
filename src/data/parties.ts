@@ -36,7 +36,7 @@ export const PARTIES: Record<PartyId, Party> = {
   PTI: {
     id: 'PTI', name: 'Pakistan Tehreek-e-Insaf', short: 'PTI', color: '#EB1C24',
     ideology: 'Populist, anti-establishment, youth/urban base',
-    provinceStrength: { Punjab: 1.04, Sindh: 0.35, KP: 1.3, Balochistan: 0.3, Islamabad: 1.05 },
+    provinceStrength: { Punjab: 1.04, Sindh: 0.35, KP: 1.08, Balochistan: 0.3, Islamabad: 1.05 },
     urbanSindhBoost: 0.25,
     establishmentAffinity: -2,
     playable: true,
@@ -45,7 +45,7 @@ export const PARTIES: Record<PartyId, Party> = {
   PPP: {
     id: 'PPP', name: 'Pakistan Peoples Party', short: 'PPP', color: '#E4181C',
     ideology: 'Centre-left, Sindh-based, federalist',
-    provinceStrength: { Punjab: 0.2, Sindh: 1.3, KP: 0.2, Balochistan: 0.35, Islamabad: 0.35 },
+    provinceStrength: { Punjab: 0.2, Sindh: 0.88, KP: 0.2, Balochistan: 0.35, Islamabad: 0.35 },
     urbanSindhBoost: -0.1,
     establishmentAffinity: 1,
     playable: true,
@@ -54,8 +54,8 @@ export const PARTIES: Record<PartyId, Party> = {
   MQMP: {
     id: 'MQMP', name: 'Muttahida Qaumi Movement-Pakistan', short: 'MQM-P', color: '#D2001C',
     ideology: 'Urban Sindh, Mohajir representation',
-    provinceStrength: { Punjab: 0, Sindh: 0.25, KP: 0, Balochistan: 0, Islamabad: 0 },
-    urbanSindhBoost: 1.1,
+    provinceStrength: { Punjab: 0, Sindh: 0.3, KP: 0, Balochistan: 0, Islamabad: 0 },
+    urbanSindhBoost: 1.25,
     establishmentAffinity: 2,
     playable: true,
     description: 'Karachi and Hyderabad\'s urban Mohajir vote bank — weakened since its 2016 split but still a kingmaker in Sindh urban seats.',
@@ -63,7 +63,7 @@ export const PARTIES: Record<PartyId, Party> = {
   JUIF: {
     id: 'JUIF', name: 'Jamiat Ulema-e-Islam (F)', short: 'JUI-F', color: '#0B6E2E',
     ideology: 'Deobandi religious-right, Pashtun belt',
-    provinceStrength: { Punjab: 0.1, Sindh: 0.1, KP: 0.55, Balochistan: 0.45, Islamabad: 0.1 },
+    provinceStrength: { Punjab: 0.1, Sindh: 0.1, KP: 0.68, Balochistan: 0.45, Islamabad: 0.1 },
     establishmentAffinity: 0,
     playable: true,
     description: 'Draws on a dense network of madrassas and Deobandi clergy across southern KP and Pashtun Balochistan; a reliable coalition partner.',
@@ -80,7 +80,7 @@ export const PARTIES: Record<PartyId, Party> = {
   ANP: {
     id: 'ANP', name: 'Awami National Party', short: 'ANP', color: '#E4181C',
     ideology: 'Secular Pashtun nationalist',
-    provinceStrength: { Punjab: 0, Sindh: 0.05, KP: 0.3, Balochistan: 0.05, Islamabad: 0 },
+    provinceStrength: { Punjab: 0, Sindh: 0.05, KP: 0.38, Balochistan: 0.05, Islamabad: 0 },
     establishmentAffinity: 0,
     playable: true,
     description: 'Once KP\'s dominant secular Pashtun party, badly weakened by militancy-era violence and PTI\'s rise, but still holds pockets of Peshawar valley.',
@@ -112,7 +112,7 @@ export const PARTIES: Record<PartyId, Party> = {
   GDA: {
     id: 'GDA', name: 'Grand Democratic Alliance', short: 'GDA', color: '#FFC72C',
     ideology: 'Anti-PPP Sindhi nationalist/electable alliance',
-    provinceStrength: { Punjab: 0, Sindh: 0.3, KP: 0, Balochistan: 0, Islamabad: 0 },
+    provinceStrength: { Punjab: 0, Sindh: 0.38, KP: 0, Balochistan: 0, Islamabad: 0 },
     urbanSindhBoost: -0.2,
     establishmentAffinity: 1,
     playable: true,
